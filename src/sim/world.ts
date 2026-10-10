@@ -80,8 +80,13 @@ export class World {
 
   gameOver = 0;                     // 0进行中 / 1玩家胜 / 2玩家败
 
+  readonly seed: number;
+  readonly variant: 'standard' | 'islands';
+
   constructor(seed = 20261009, variant: 'standard' | 'islands' = 'standard', persistLog = true) {
     this.log = new SimLog(5000, persistLog);
+    this.seed = seed;
+    this.variant = variant;
     const map = generateMap(seed, variant);
     this.terrain = map.terrain;
     this.height = map.height;
@@ -114,9 +119,11 @@ export class World {
       this.spawnUnit('builder', owner as 0 | 1, cx + 40, cy);
     }
     spawnNeutrals(this);
-    if (persistLog) {
-      this.log.beginSession(`──── 新对局 · ${variant === 'islands' ? '群岛海峡' : '标准大陆'} · seed=${seed} · ${new Date().toLocaleString()} ────`);
-    }
+  }
+
+  /** 开局写对局头（Game.start时调用）——菜单页/无头模拟不再产生噪音对局头 */
+  startSession(): void {
+    this.log.beginSession(`──── 新对局 · ${this.variant === 'islands' ? '群岛海峡' : '标准大陆'} · seed=${this.seed} · ${new Date().toLocaleString()} ────`);
     this.addLog('system', '对局开始：双基地镜像地图，摧毁敌方指挥基地获胜。小心蛮族营地');
   }
 

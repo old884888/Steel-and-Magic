@@ -74,9 +74,11 @@ function wireAISettings(): void {
   refresh();
 }
 
-/** 崩溃日志：全局错误捕获，写入localStorage（闪退后重开可查） */
+/** 崩溃日志：全局错误捕获，写入localStorage（闪退后重开可查）。同指纹错误去重，防刷屏挤掉真证据 */
 function setupCrashLogger(): void {
   const KEY = 'sm_crash_log';
+  const SIG_KEY = 'sm_crash_sig';
+  const CAP = 6000;
   const NL = '\n';
   try {
     const prev = localStorage.getItem(KEY);
@@ -87,21 +89,37 @@ function setupCrashLogger(): void {
       div.textContent = '[Last Crash]' + NL + prev;
       document.body.appendChild(div);
       setTimeout(() => div.remove(), 15000);
+      // 已送达即销毁：横幅不再每次开机回放旧账；同时清指纹，让同类新错误能被重新记录
+      localStorage.removeItem(KEY);
+      localStorage.removeItem(SIG_KEY);
     }
   } catch { /* ignore */ }
 
+  /** 同一错误短时间反复炸（如热更新半新半旧）只记一次，别把旧证据挤出去 */
+  const isDuplicate = (fingerprint: string): boolean => {
+    try {
+      if (localStorage.getItem(SIG_KEY) === fingerprint) return true;
+      localStorage.setItem(SIG_KEY, fingerprint);
+    } catch { /* ignore */ }
+    return false;
+  };
+
   window.addEventListener('error', (e) => {
     try {
+      const fingerprint = 'e:' + e.message + '|' + (e.filename || '') + ':' + e.lineno;
+      if (isDuplicate(fingerprint)) return;
       const msg = '[' + new Date().toLocaleTimeString() + '] ' + e.message + NL + '  at ' + (e.filename || '?') + ':' + e.lineno + ':' + e.colno + NL + '  ' + String(e.error?.stack || '').slice(0, 500);
       const existing = localStorage.getItem(KEY) || '';
-      localStorage.setItem(KEY, (existing + NL + msg).slice(-3000));
+      localStorage.setItem(KEY, (existing + NL + msg).slice(-CAP));
     } catch { /* ignore */ }
   });
   window.addEventListener('unhandledrejection', (e) => {
     try {
-      const msg = '[' + new Date().toLocaleTimeString() + '] Promise: ' + String(e.reason).slice(0, 300);
+      const reason = String(e.reason).slice(0, 200);
+      if (isDuplicate('p:' + reason)) return;
+      const msg = '[' + new Date().toLocaleTimeString() + '] Promise: ' + reason;
       const existing = localStorage.getItem(KEY) || '';
-      localStorage.setItem(KEY, (existing + NL + msg).slice(-3000));
+      localStorage.setItem(KEY, (existing + NL + msg).slice(-CAP));
     } catch { /* ignore */ }
   });
 }

@@ -27,7 +27,17 @@ export class SimLog {
   private dirty = false;
   private lastFlush = 0;
 
-  constructor(max = 5000, persistent = false) { this.max = max; this.persistent = persistent; }
+  constructor(max = 5000, persistent = false) {
+    this.max = max;
+    this.persistent = persistent;
+    // 历史日志在构造时自载入（菜单查旧账用）——自包含，不依赖外部调用时机
+    if (persistent) {
+      try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (raw) this.entries = JSON.parse(raw) as LogEntry[];
+      } catch { this.entries = []; }
+    }
+  }
 
   /** 由 World.addLog 调用 */
   _push(entry: LogEntry, max: number): void {
@@ -37,13 +47,18 @@ export class SimLog {
     this.dirty = true;
   }
 
-  /** 开局：载入历史日志并写入对局头分隔线（persistent=false 时跳过） */
-  beginSession(header: string): void {
+  /** 载入历史日志（页面加载时调用；菜单查旧账用，不产生写入） */
+  restore(): void {
     if (!this.persistent) return;
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) this.entries = JSON.parse(raw) as LogEntry[];
     } catch { this.entries = []; }
+  }
+
+  /** 开局写入对局头分隔线（真正开始游戏时调用；persistent=false 时跳过） */
+  beginSession(header: string): void {
+    if (!this.persistent) return;
     this._push({ t: 0, tick: 0, cat: 'system', msg: header }, this.max);
     this.maybeFlush(true);
   }

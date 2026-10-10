@@ -301,9 +301,14 @@ export class AIController {
     const okSpot = (tx: number, ty: number): boolean => {
       if (!w.canPlace(defId, tx, ty).ok) return false;
       if (!reach) return true;
-      for (let dy = 0; dy < def.size; dy++) {
-        for (let dx = 0; dx < def.size; dx++) {
-          if (reach.has((ty + dy) * MAP_W + tx + dx)) return true;
+      // 足迹本身会变成建筑（不可通行），必须要求足迹外一圈至少一格可达
+      for (let dy = -1; dy <= def.size; dy++) {
+        for (let dx = -1; dx <= def.size; dx++) {
+          const edge = dx < 0 || dy < 0 || dx >= def.size || dy >= def.size;
+          if (!edge) continue;
+          const x = tx + dx, y = ty + dy;
+          if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+          if (reach.has(y * MAP_W + x)) return true;
         }
       }
       return false;

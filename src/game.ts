@@ -393,5 +393,8 @@ export class Game {
   /** 菜单背景：渲染一帧静态画面（不启动循环） */
   renderOnce(): void { this.renderFrame(); }
 
-  start(): void { this.loop.start(); }
+  start(): void {
+    this.world.startSession(); // 对局头：真正开局才写
+    this.loop.start();
+  }
 }
