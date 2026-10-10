@@ -1,0 +1,139 @@
+import { Game } from './game';
+import { runSelftest } from './sim/selftest';
+import { loadAISettings, saveAISettings, type AISettings, type TacticId } from './sim/ai-config';
+
+function fitCanvas(canvas: HTMLCanvasElement, game?: Game): void {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = window.innerWidth, h = window.innerHeight;
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d')!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (game) {
+    game.cam.setViewport(w, h);
+    game.cam.clamp();
+    game.renderer.setDpr(dpr); // 渲染器必须知道系统缩放，否则点击错位
+  }
+}
+
+/** 设置弹窗：AI难度/性格/自定义持久化（对下一局生效） */
+function wireAISettings(): void {
+  const settings: AISettings = loadAISettings();
+  const $ = (id: string): HTMLElement => document.getElementById(id)!;
+  const diffSel = $('set-ai-difficulty') as HTMLSelectElement;
+  const persSel = $('set-ai-personality') as HTMLSelectElement;
+  const customBox = $('ai-custom');
+  const eco = $('set-ai-eco') as HTMLInputElement;
+  const wave = $('set-ai-wave') as HTMLInputElement;
+  const interval = $('set-ai-interval') as HTMLInputElement;
+  const ecoV = $('set-ai-eco-v');
+  const waveV = $('set-ai-wave-v');
+  const intervalV = $('set-ai-interval-v');
+  const tacticIds: TacticId[] = ['focusFire', 'retreat', 'spareArtillery', 'highGround', 'weiwei', 'denyMining', 'counterComp'];
+
+  const refresh = (): void => {
+    diffSel.value = settings.difficulty;
+    persSel.value = settings.personality;
+    customBox.style.display = settings.difficulty === 'custom' ? 'flex' : 'none';
+    if (settings.custom) {
+      eco.value = String(settings.custom.economyMul);
+      wave.value = String(settings.custom.waveStart);
+      interval.value = String(settings.custom.waveInterval);
+    }
+    ecoV.textContent = eco.value;
+    waveV.textContent = wave.value;
+    intervalV.textContent = wave.value && interval.value ? interval.value + 's' : '';
+    for (const id of tacticIds) {
+      ($('set-t-' + id) as HTMLInputElement).checked = settings.custom ? settings.custom.tactics.includes(id) : false;
+    }
+  };
+
+  const save = (): void => {
+    if (settings.difficulty === 'custom') {
+      settings.custom = {
+        economyMul: Number(eco.value),
+        thinkSec: 1.0,
+        waveStart: Number(wave.value),
+        waveInterval: Number(interval.value),
+        tactics: tacticIds.filter(id => ($('set-t-' + id) as HTMLInputElement).checked),
+      };
+    }
+    saveAISettings(settings);
+  };
+
+  diffSel.addEventListener('change', () => { settings.difficulty = diffSel.value as AISettings['difficulty']; refresh(); save(); });
+  persSel.addEventListener('change', () => { settings.personality = persSel.value as AISettings['personality']; save(); });
+  eco.addEventListener('input', () => { ecoV.textContent = eco.value; });
+  wave.addEventListener('input', () => { waveV.textContent = wave.value; });
+  const saveCustom = (): void => { if (settings.difficulty === 'custom') save(); };
+  for (const el of [eco, wave, interval]) el.addEventListener('change', saveCustom);
+  for (const id of tacticIds) ($('set-t-' + id) as HTMLInputElement).addEventListener('change', saveCustom);
+
+  refresh();
+}
+
+function boot(): void {
+  const params = new URLSearchParams(location.search);
+
+  // 无头模拟自测模式：跳过主菜单直接跑
+  if (params.has('selftest')) {
+    fitCanvas(document.getElementById('game') as HTMLCanvasElement);
+    runSelftest();
+    return;
+  }
+
+  const canvas = document.getElementById('game') as HTMLCanvasElement;
+  const game = new Game(canvas);
+  fitCanvas(canvas, game);
+  window.addEventListener('resize', () => {
+    fitCanvas(canvas, game);
+    if (!game.loop.running) game.renderOnce();
+  });
+  // 开发调试句柄（仅dev模式）：浏览器控制台可用 __game 驱动游戏内部状态
+  if (import.meta.env.DEV) {
+    (window as unknown as { __game: Game }).__game = game;
+  }
+
+  // ---- 主菜单 ----
+  const menu = document.getElementById('menu')!;
+  const settings = document.getElementById('settings')!;
+  const exitScreen = document.getElementById('exitScreen')!;
+
+  game.renderOnce(); // 菜单背后垫一帧基地全景
+
+  document.getElementById('btn-start')!.addEventListener('click', () => {
+    menu.style.display = 'none';
+    game.start();
+  });
+  document.getElementById('btn-settings')!.addEventListener('click', () => {
+    settings.style.display = 'flex';
+  });
+  document.getElementById('btn-settings-close')!.addEventListener('click', () => {
+    settings.style.display = 'none';
+  });
+  document.getElementById('btn-exit')!.addEventListener('click', () => {
+    // 浏览器通常禁止脚本关闭非脚本打开的标签页，先尝试，失败则显示谢幕画面
+    window.close();
+    setTimeout(() => { exitScreen.style.display = 'flex'; }, 120);
+  });
+
+  wireAISettings();
+  wireMapSetting();
+}
+
+/** 地图选择持久化（对下一局生效） */
+function wireMapSetting(): void {
+  const sel = document.getElementById('set-map') as HTMLSelectElement | null;
+  if (!sel) return;
+  try {
+    const saved = localStorage.getItem('sm_map');
+    if (saved === 'islands' || saved === 'standard') sel.value = saved;
+  } catch { /* ignore */ }
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem('sm_map', sel.value); } catch { /* ignore */ }
+  });
+}
+
+boot();

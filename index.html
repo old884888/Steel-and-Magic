@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>钢铁与魔法 · Steel &amp; Magic</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; }
+    body { font-family: "Microsoft YaHei", system-ui, sans-serif; color: #d7dde6; }
+
+    #game { position: absolute; inset: 0; display: block; cursor: crosshair; touch-action: none; }
+
+    /* ---------- 顶部资源栏 ---------- */
+    #topbar {
+      position: absolute; top: 0; left: 0; right: 0; height: 42px;
+      display: flex; align-items: center; gap: 22px; padding: 0 16px;
+      background: linear-gradient(180deg, rgba(15,20,28,.96), rgba(15,20,28,.82));
+      border-bottom: 1px solid #2a3546; font-size: 15px; z-index: 10;
+      pointer-events: none;
+    }
+    #topbar .res { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+    #topbar .rate { font-size: 11px; color: #7d8a9c; font-weight: 400; margin-left: 2px; }
+    #topbar .title { font-weight: 800; color: #f0a63c; letter-spacing: 2px; margin-right: 8px; }
+    #topbar .spacer { flex: 1; }
+    #topbar #pop.warn { color: #ff6b57; }
+
+    /* ---------- 左下小地图 ---------- */
+    #minimapWrap {
+      position: absolute; left: 10px; bottom: 10px; padding: 5px;
+      background: rgba(15,20,28,.92); border: 1px solid #2a3546; border-radius: 6px; z-index: 10;
+    }
+    #minimap { display: block; width: 176px; height: 176px; cursor: pointer; }
+
+    /* ---------- 右下选中/建造面板 ---------- */
+    #panel {
+      position: absolute; right: 10px; bottom: 10px; width: 308px; min-height: 96px;
+      background: rgba(15,20,28,.92); border: 1px solid #2a3546; border-radius: 6px;
+      padding: 10px 12px; z-index: 10; font-size: 13px;
+    }
+    #panel h3 { font-size: 14px; color: #f0a63c; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    #panel h3 .hp { color: #8fd18f; font-weight: 600; }
+    #panel .hint { color: #7d8a9c; line-height: 1.7; }
+    #panel .btnrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    #panel button.btn {
+      background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      padding: 6px 9px; border-radius: 4px; font-size: 12px; cursor: pointer; line-height: 1.5;
+      min-width: 76px; text-align: center;
+    }
+    #panel button.btn:hover:not(:disabled) { background: #27374d; border-color: #f0a63c; }
+    #panel button.btn:disabled { opacity: .38; cursor: not-allowed; }
+    #panel button.btn .cost { color: #9fb0c5; font-size: 11px; display: block; }
+    #panel button.btn.active { border-color: #f0a63c; background: #3a3020; }
+    #panel .queue { margin-top: 8px; font-size: 12px; color: #9fb0c5; }
+    #panel .queuebar { height: 6px; background: #1c2735; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+    #panel .queuebar i { display: block; height: 100%; background: #f0a63c; }
+
+    /* ---------- 提示消息 ---------- */
+    #toasts { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); z-index: 20; pointer-events: none; }
+    .toast {
+      background: rgba(40,26,18,.94); border: 1px solid #a06a2c; color: #ffd9a0;
+      padding: 7px 16px; border-radius: 4px; margin-bottom: 6px; font-size: 13px;
+      animation: toastIn .18s ease-out;
+    }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+    .toast.fadeout { transition: opacity .5s; opacity: 0; }
+
+    /* ---------- 胜负结算 ---------- */
+    #overlay {
+      position: absolute; inset: 0; z-index: 30; display: none;
+      align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+      background: rgba(5,8,12,.78);
+    }
+    #overlay h1 { font-size: 44px; letter-spacing: 8px; }
+    #overlay h1.win { color: #ffd75e; text-shadow: 0 0 30px rgba(255,180,40,.6); }
+    #overlay h1.lose { color: #ff5e4e; text-shadow: 0 0 30px rgba(255,60,40,.5); }
+    #overlay p { color: #9fb0c5; }
+    #overlay button {
+      background: #f0a63c; border: none; color: #1a1206; font-size: 16px; font-weight: 700;
+      padding: 10px 34px; border-radius: 4px; cursor: pointer;
+    }
+
+    /* ---------- 主菜单 ---------- */
+    #menu {
+      position: absolute; inset: 0; z-index: 40; display: flex;
+      flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+      background:
+        radial-gradient(1200px 600px at 50% 20%, rgba(74,125,214,.12), transparent),
+        linear-gradient(180deg, rgba(7,10,14,.94), rgba(7,10,14,.97));
+    }
+    #menu h1 {
+      font-size: 64px; letter-spacing: 14px; color: #f0a63c;
+      text-shadow: 0 0 40px rgba(240,166,60,.35), 0 4px 0 #7a4f14;
+      margin-bottom: 2px;
+    }
+    #menu .sub { color: #7d8a9c; letter-spacing: 6px; font-size: 14px; margin-bottom: 30px; }
+    #menu .menu-btns { display: flex; flex-direction: column; gap: 12px; width: 260px; }
+    #menu .menu-btns button {
+      background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      font-size: 18px; letter-spacing: 8px; padding: 13px 0; border-radius: 4px; cursor: pointer;
+      transition: all .12s;
+    }
+    #menu .menu-btns button:hover { background: #27374d; border-color: #f0a63c; color: #ffd9a0; transform: translateY(-1px); }
+    #menu .menu-btns button.primary { background: #f0a63c; color: #1a1206; font-weight: 800; border: none; }
+    #menu .menu-btns button.primary:hover { background: #ffbe5c; }
+    #menu .ver { position: absolute; bottom: 16px; color: #4d5a6b; font-size: 12px; letter-spacing: 2px; }
+
+    /* ---------- 设置弹窗（占位） ---------- */
+    #settings {
+      position: absolute; inset: 0; z-index: 50; display: none;
+      align-items: center; justify-content: center; background: rgba(5,8,12,.6);
+    }
+    #settings .modal {
+      width: 380px; background: #131a24; border: 1px solid #2a3546; border-radius: 8px; padding: 22px 26px;
+    }
+    #settings h2 { color: #f0a63c; font-size: 18px; margin-bottom: 16px; letter-spacing: 4px; }
+    #settings .row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 14px; }
+    #settings .row label { width: 70px; color: #9fb0c5; }
+    #settings .row .soon { color: #586576; font-size: 11px; margin-left: auto; }
+    #settings .hk-table { font-size: 12px; margin-bottom: 6px; }
+    #settings .hk-table > div {
+      display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #223042; color: #9fb0c5;
+    }
+    #settings .hk-table .hk {
+      flex: 0 0 96px; color: #ffd9a0; font-weight: 600;
+    }
+    #settings button {
+      margin-top: 8px; width: 100%; background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      padding: 9px 0; border-radius: 4px; cursor: pointer; letter-spacing: 6px;
+    }
+    #settings button:hover { border-color: #f0a63c; }
+
+    /* ---------- 退出画面 ---------- */
+    #exitScreen {
+      position: absolute; inset: 0; z-index: 60; display: none;
+      flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      background: #07090c;
+    }
+    #exitScreen h1 { color: #f0a63c; letter-spacing: 10px; font-size: 40px; }
+    #exitScreen p { color: #7d8a9c; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="topbar">
+    <span class="title">钢铁与魔法</span>
+    <span class="res">🪵 <span id="res-wood">0</span><span class="rate" id="rate-wood"></span></span>
+    <span class="res">🌾 <span id="res-food">0</span><span class="rate" id="rate-food"></span></span>
+    <span class="res">⛏️ <span id="res-ore">0</span><span class="rate" id="rate-ore"></span></span>
+    <span class="res">👥 <span id="pop">0/0</span></span>
+    <span class="spacer"></span>
+    <span class="res" id="gametime">00:00</span>
+  </div>
+
+  <div id="minimapWrap"><canvas id="minimap" width="176" height="176"></canvas></div>
+  <div id="panel"><div class="hint">左键框选部队 · 右键下达指令<br>选中工程车可建造建筑</div></div>
+  <div id="toasts"></div>
+
+  <div id="overlay">
+    <h1 id="overlay-title"></h1>
+    <p id="overlay-sub"></p>
+    <button onclick="location.reload()">返 回 主 菜 单</button>
+  </div>
+
+  <div id="menu">
+    <h1>钢铁与魔法</h1>
+    <div class="sub">STEEL &amp; MAGIC · 即时战略 · 科技联邦篇</div>
+    <div class="menu-btns">
+      <button id="btn-start" class="primary">开 始 游 戏</button>
+      <button id="btn-settings">设 置</button>
+      <button id="btn-exit">退 出</button>
+    </div>
+    <div class="ver">v0.6 · 科技联邦篇 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
+  </div>
+
+  <div id="settings">
+    <div class="modal">
+      <h2>设 置</h2>
+      <div class="row"><label>音量</label><input type="range" disabled /><span class="soon">后续版本开放</span></div>
+      <div class="row"><label>地图</label>
+        <select id="set-map">
+          <option value="standard" selected>Standard Continent</option>
+          <option value="islands">Archipelago Strait</option>
+        </select>
+        <span class="soon">Takes effect on next game</span></div>
+      <div class="row"><label>AI difficulty</label>
+        <select id="set-ai-difficulty">
+          <option value="easy">轻松</option>
+          <option value="standard" selected>标准</option>
+          <option value="hard">困难</option>
+          <option value="nightmare">噩梦</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div class="row"><label>AI性格</label>
+        <select id="set-ai-personality">
+          <option value="balanced" selected>均衡</option>
+          <option value="rusher">莽夫</option>
+          <option value="turtler">乌龟</option>
+          <option value="eco">种田</option>
+        </select>
+      </div>
+      <div id="ai-custom" style="display:none; flex-direction:column; gap:8px; margin-bottom:10px;">
+        <div class="row"><label>经济倍率</label><input type="range" id="set-ai-eco" min="0.5" max="2" step="0.05" /><span id="set-ai-eco-v" class="soon">1.0</span></div>
+        <div class="row"><label>首波规模</label><input type="range" id="set-ai-wave" min="2" max="16" step="1" /><span id="set-ai-wave-v" class="soon">6</span></div>
+        <div class="row"><label>波间隔</label><input type="range" id="set-ai-interval" min="15" max="90" step="5" /><span id="set-ai-interval-v" class="soon">40s</span></div>
+        <div class="hk-table">
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-focusFire" checked /> 集火</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-retreat" checked /> 撤退止损</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-spareArtillery" checked /> 保炮车</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-highGround" /> 抢高地</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-weiwei" /> 围魏救赵</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-denyMining" /> 断矿流</label></div>
+          <div><label class="hk" style="flex:0 0 auto"><input type="checkbox" id="set-t-counterComp" /> 克制配兵</label></div>
+        </div>
+      </div>
+      <div class="row"><label>画质</label>
+        <select disabled><option>占位</option></select><span class="soon">后续版本开放</span></div>
+      <div class="row"><label>迷雾</label>
+        <select disabled><option>开</option></select><span class="soon">后续版本开放</span></div>
+      <h2 style="margin-top:10px">快 捷 键</h2>
+      <div class="hk-table">
+        <div><span class="hk">双击单位</span><span>选中屏幕内全部同类单位</span></div>
+        <div><span class="hk">A</span><span>攻击移动（途中主动交战）</span></div>
+        <div><span class="hk">S</span><span>停止</span></div>
+        <div><span class="hk">H</span><span>原地驻守（只打射程内，绝不追击）</span></div>
+        <div><span class="hk">Ctrl+1~9</span><span>设置编队</span></div>
+        <div><span class="hk">1~9</span><span>选择编队</span></div>
+        <div><span class="hk">WASD/方向键</span><span>移动镜头</span></div>
+        <div><span class="hk">滚轮</span><span>缩放（以光标为中心）</span></div>
+        <div><span class="hk">中键拖拽</span><span>平移镜头</span></div>
+        <div><span class="hk">Esc / 右键</span><span>取消当前模式</span></div>
+      </div>
+      <p class="soon" style="text-align:center;margin-top:6px">改键功能后续版本开放</p>
+      <button id="btn-settings-close">返 回</button>
+    </div>
+  </div>
+
+  <div id="exitScreen">
+    <h1>感谢游玩</h1>
+    <p>可以安全关闭此页面。无量天尊，赛博功德 +1。</p>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
