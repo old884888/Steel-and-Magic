@@ -3,11 +3,13 @@ import type { BuildingDef } from '../types';
 /** 建筑定义表 —— 数值平衡改这里 */
 export const BUILDING_DEFS: Record<string, BuildingDef> = {
   hq: {
-    id: 'hq', name: '指挥基地', aiRole: 'support', armor: 'heavy', desc: '大本营：生产工程车、保底产出三种资源、+10人口。被摧毁即战败',
+    id: 'hq', name: '指挥基地', aiRole: 'support', armor: 'heavy', desc: '大本营：生产工程车与农夫、保底产出、+10人口。自带防卫火炮（对空对地溅射）与舷侧机枪（对空对地），独立开火。被摧毁即战败',
     hp: 1200, size: 3, vision: 9,
     cost: {}, buildTime: 0, unique: true, popBonus: 10, isDepot: true,
     income: { wood: 0.2, food: 0.2, ore: 0.2 },
-    produces: ['builder'],
+    produces: ['builder', 'farmer'],
+    weapon: { damage: 35, range: 190, cooldown: 3.2, projectile: 'explosive', splash: 26, targetsAir: true },
+    mg: { damage: 6, range: 90, cooldown: 0.8, projectile: 'bullet', targetsAir: true },
   },
   farm: {
     id: 'farm', name: '补给农场', aiPriority: 50, aiRole: 'economy', desc: '稳定食物来源（0.45/秒），+10人口上限，永不枯竭',
@@ -28,6 +30,11 @@ export const BUILDING_DEFS: Record<string, BuildingDef> = {
     id: 'storehouse', name: '仓库', aiPriority: 40, aiRole: 'economy', desc: '三种资源存储上限+500，兼作工程车卸货点。建在林区矿区旁省脚程',
     hp: 300, size: 2, vision: 4,
     cost: { wood: 50 }, buildTime: 8, capBonus: 500, isDepot: true,
+  },
+  lab: {
+    id: 'lab', name: '研究所', aiPriority: 58, aiRole: 'support', desc: '解锁科技研究：选中后立项，全局同一时间仅一项；研究所损毁则进度冻结',
+    hp: 450, size: 2, vision: 5,
+    cost: { wood: 120, ore: 80 }, buildTime: 20,
   },
   barracks: {
     id: 'barracks', name: '步兵营', aiPriority: 65, aiRole: 'combat', desc: '训练动员步兵，通向装甲力量的第一步',

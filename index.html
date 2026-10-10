@@ -52,6 +52,10 @@
     #panel button.btn .cost { color: #9fb0c5; font-size: 11px; display: block; }
     #panel button.btn.active { border-color: #f0a63c; background: #3a3020; }
     #panel .queue { margin-top: 8px; font-size: 12px; color: #9fb0c5; }
+    .qchip {
+      display: inline-block; background: #1c2735; border: 1px solid #35455c; border-radius: 3px;
+      padding: 1px 6px; margin-right: 4px; font-size: 11px; color: #c8d2e0;
+    }
     #panel .queuebar { height: 6px; background: #1c2735; border-radius: 3px; margin-top: 4px; overflow: hidden; }
     #panel .queuebar i { display: block; height: 100%; background: #f0a63c; }
 
@@ -64,6 +68,24 @@
     }
     @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
     .toast.fadeout { transition: opacity .5s; opacity: 0; }
+
+    /* ---------- 事件卡 ---------- */
+    #eventCard {
+      position: absolute; top: 110px; left: 50%; transform: translateX(-50%); z-index: 25;
+      width: 360px; background: rgba(26,20,10,.96); border: 1px solid #a06a2c; border-radius: 6px;
+      padding: 12px 14px; font-size: 13px; animation: toastIn .18s ease-out;
+      box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    }
+    #eventCard .ev-title { color: #ffd75e; font-weight: 700; margin-bottom: 6px; letter-spacing: 1px; }
+    #eventCard .ev-desc { color: #d7c9a8; line-height: 1.5; margin-bottom: 8px; font-size: 12px; }
+    #eventCard .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+    #eventCard button.btn {
+      background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #eventCard button.btn:hover { border-color: #f0a63c; color: #ffd9a0; }
+    #eventCard .ev-bar { height: 4px; background: #1c2735; border-radius: 2px; margin-top: 9px; overflow: hidden; }
+    #eventCard .ev-bar i { display: block; height: 100%; background: #f0a63c; }
 
     /* ---------- 胜负结算 ---------- */
     #overlay {
@@ -138,6 +160,34 @@
     }
     #exitScreen h1 { color: #f0a63c; letter-spacing: 10px; font-size: 40px; }
     #exitScreen p { color: #7d8a9c; }
+
+    /* ---------- 作战日志（顶栏入口 + 弹窗查看器） ---------- */
+    #btn-log-top {
+      pointer-events: auto; background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      border-radius: 4px; font-size: 12px; padding: 3px 10px; cursor: pointer; margin-left: 14px;
+    }
+    #btn-log-top:hover { border-color: #f0a63c; color: #ffd9a0; }
+    #logview {
+      position: absolute; inset: 0; z-index: 45; display: none;
+      align-items: center; justify-content: center; background: rgba(5,8,12,.6);
+    }
+    #logview .modal {
+      width: min(640px, 92vw); background: #131a24; border: 1px solid #2a3546;
+      border-radius: 8px; padding: 18px 22px;
+    }
+    #logview h2 { color: #f0a63c; font-size: 18px; letter-spacing: 4px; margin-bottom: 10px; }
+    #logview pre {
+      user-select: text; -webkit-user-select: text; max-height: 56vh; overflow: auto;
+      background: #0b0e13; border: 1px solid #223042; border-radius: 4px; padding: 10px;
+      font-size: 11px; line-height: 1.55; font-family: Consolas, monospace;
+      color: #9fb0c5; white-space: pre-wrap; word-break: break-all;
+    }
+    #logview .btns { display: flex; gap: 10px; margin-top: 12px; }
+    #logview .btns button {
+      flex: 1; background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+      padding: 8px 0; border-radius: 4px; cursor: pointer; letter-spacing: 2px; font-size: 13px;
+    }
+    #logview .btns button:hover { border-color: #f0a63c; color: #ffd9a0; }
   </style>
 </head>
 <body>
@@ -151,11 +201,13 @@
     <span class="res">👥 <span id="pop">0/0</span></span>
     <span class="spacer"></span>
     <span class="res" id="gametime">00:00</span>
+    <button id="btn-log-top" title="查看作战日志（自动保存，可导出文件）">📜 日志</button>
   </div>
 
   <div id="minimapWrap"><canvas id="minimap" width="176" height="176"></canvas></div>
   <div id="panel"><div class="hint">左键框选部队 · 右键下达指令<br>选中工程车可建造建筑</div></div>
   <div id="toasts"></div>
+  <div id="eventCard" style="display:none"></div>
 
   <div id="overlay">
     <h1 id="overlay-title"></h1>
@@ -169,9 +221,10 @@
     <div class="menu-btns">
       <button id="btn-start" class="primary">开 始 游 戏</button>
       <button id="btn-settings">设 置</button>
+      <button id="btn-log-menu">作 战 日 志</button>
       <button id="btn-exit">退 出</button>
     </div>
-    <div class="ver">v0.6 · 科技联邦篇 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
+    <div class="ver">v0.9 · 科技联邦篇 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
   </div>
 
   <div id="settings">
@@ -230,6 +283,8 @@
         <div><span class="hk">WASD/方向键</span><span>移动镜头</span></div>
         <div><span class="hk">滚轮</span><span>缩放（以光标为中心）</span></div>
         <div><span class="hk">中键拖拽</span><span>平移镜头</span></div>
+        <div><span class="hk">光标贴屏幕边缘</span><span>镜头滚动（等同方向键）</span></div>
+        <div><span class="hk">右键（选中建筑）</span><span>设置集结点</span></div>
         <div><span class="hk">Esc / 右键</span><span>取消当前模式</span></div>
       </div>
       <p class="soon" style="text-align:center;margin-top:6px">改键功能后续版本开放</p>
@@ -240,6 +295,18 @@
   <div id="exitScreen">
     <h1>感谢游玩</h1>
     <p>可以安全关闭此页面。无量天尊，赛博功德 +1。</p>
+  </div>
+
+  <div id="logview">
+    <div class="modal">
+      <h2>作 战 日 志</h2>
+      <pre id="logview-pre">（暂无日志）</pre>
+      <div class="btns">
+        <button id="btn-log-export">导出 .log 文件</button>
+        <button id="btn-log-clear">清空历史</button>
+        <button id="btn-log-close">关 闭</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

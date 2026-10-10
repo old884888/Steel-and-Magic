@@ -59,6 +59,7 @@ export class Minimap {
       : kind === 2 ? '#2e5e2a'
       : kind === 3 ? '#8f8f6a'
       : kind === 4 ? '#a09060'
+      : kind === 6 ? '#d9b44a'
       : base;
     this.tctx.fillRect(x * s, y * s, s + 0.5, s + 0.5);
   }

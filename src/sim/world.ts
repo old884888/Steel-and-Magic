@@ -1,7 +1,7 @@
 import {
-  MAP_W, MAP_H, TILE, T_GRASS, T_ORE, T_TREE, T_WATER, T_RAMP, T_FORD,
+  MAP_W, MAP_H, TILE, T_GRASS, T_ORE, T_TREE, T_WATER, T_RAMP, T_FORD, T_FARM,
   START_RES, POP_BASE, POP_MAX, PATH_BUDGET, OWNER_PLAYER,
-  STORAGE_BASE,
+  STORAGE_BASE, FARM_YIELD,
 } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
@@ -14,6 +14,11 @@ import type { FxEvent, Projectile, Res, ResAmount, Vec } from '../types';
 import { generateMap } from './mapgen';
 import { spawnNeutrals } from './neutral';
 import { SimLog, type LogCat } from './log';
+import { EventDirector } from './events';
+import {
+  EDICT_MULT, LOGISTICS_POP, LOGISTICS_STORAGE, DEEP_STORAGE_BONUS,
+  TECHS, TECH_MULT, type EdictId, type TechId,
+} from '../data/policies';
 
 export interface PlayerState {
   res: { wood: number; food: number; ore: number };
@@ -23,6 +28,10 @@ export interface PlayerState {
   pop: number;
   popCap: number;
   defeat: boolean;
+  edict: EdictId | null;       // 当前法令（全局四选一）
+  edictCd: number;             // 法令切换冷却（秒）
+  techs: TechId[];             // 已完成科技
+  research: { id: TechId; remaining: number } | null; // 进行中的研究（全局单线）
 }
 
 /**
@@ -46,6 +55,12 @@ export class World {
 
   fog: [Uint8Array, Uint8Array];
 
+  // 麦田层（格子经济：T_FARM地块的状态与归属）
+  farmOwner: Uint8Array;      // 0无主 / 1玩家 / 2敌方
+  farmStage: Uint8Array;      // 0茬地 / 1~2生长 / 3成熟
+  farmPlanted: Float32Array;  // 播种时刻（-1=未种）
+  farmTiles = new Set<number>();
+
   players: [PlayerState, PlayerState];
 
   projectiles: Projectile[] = [];
@@ -54,15 +69,19 @@ export class World {
   fireZones: FireZone[] = [];         // 地面燃烧区（爆炸弹产生）
   dirtyTiles = new Set<number>();   // 地形变化（渲染层重绘用）
 
-  log = new SimLog();
+  log: SimLog;
   private logRepeat = new Map<string, number>(); // 节流键 -> 上次记录时间
+
+  events = new EventDirector();     // 事件卡调度
+  barbTruceUntil = 0;               // 蛮族停战截止（事件卡效果，neutral读取）
 
   pathBudget = PATH_BUDGET;
   pendingPaths: number[] = [];      // 等待预算的实体id
 
   gameOver = 0;                     // 0进行中 / 1玩家胜 / 2玩家败
 
-  constructor(seed = 20261009, variant: 'standard' | 'islands' = 'standard') {
+  constructor(seed = 20261009, variant: 'standard' | 'islands' = 'standard', persistLog = true) {
+    this.log = new SimLog(5000, persistLog);
     const map = generateMap(seed, variant);
     this.terrain = map.terrain;
     this.height = map.height;
@@ -71,10 +90,13 @@ export class World {
     this.occupied = new Uint8Array(MAP_W * MAP_H);
     this.buildingAt = new Int32Array(MAP_W * MAP_H).fill(-1);
     this.walkable = new Uint8Array(MAP_W * MAP_H);
+    this.farmOwner = new Uint8Array(MAP_W * MAP_H);
+    this.farmStage = new Uint8Array(MAP_W * MAP_H);
+    this.farmPlanted = new Float32Array(MAP_W * MAP_H).fill(-1);
     this.fog = [new Uint8Array(MAP_W * MAP_H), new Uint8Array(MAP_W * MAP_H)];
     this.players = [
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false },
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, edict: null, edictCd: 0, techs: [], research: null },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, edict: null, edictCd: 0, techs: [], research: null },
     ];
     this.refreshWalkableAll();
     // 舰船通行网格：只有深水可航行（滩头T_FORD是陆地通道，舰船禁行）
@@ -92,7 +114,115 @@ export class World {
       this.spawnUnit('builder', owner as 0 | 1, cx + 40, cy);
     }
     spawnNeutrals(this);
+    if (persistLog) {
+      this.log.beginSession(`──── 新对局 · ${variant === 'islands' ? '群岛海峡' : '标准大陆'} · seed=${seed} · ${new Date().toLocaleString()} ────`);
+    }
     this.addLog('system', '对局开始：双基地镜像地图，摧毁敌方指挥基地获胜。小心蛮族营地');
+  }
+
+  // ================= 法令/科技/地利（运营深度系统） =================
+
+  /** 全局效果乘数：法令×科技叠乘（owner>1恒为1） */
+  mult(owner: number, kind: 'gather' | 'damage' | 'range' | 'build'): number {
+    if (owner > 1) return 1;
+    const p = this.players[owner];
+    let m = 1;
+    const em = p.edict ? EDICT_MULT[p.edict][kind] : undefined;
+    if (em) m *= em;
+    for (const t of p.techs) {
+      const tm = TECH_MULT[t]?.[kind];
+      if (tm) m *= tm;
+    }
+    return m;
+  }
+
+  /** 切换法令（冷却中/重复切换返回false） */
+  setEdict(owner: 0 | 1, id: EdictId): boolean {
+    const p = this.players[owner];
+    if (p.edict === id || p.edictCd > 0) return false;
+    p.edict = id;
+    p.edictCd = 45;
+    this.addLog('system', `切换法令：${id}`, owner);
+    return true;
+  }
+
+  hasLab(owner: number): boolean {
+    for (const e of this.entities.values()) {
+      if (e.kind === 'building' && e.defId === 'lab' && e.done && e.owner === owner) return true;
+    }
+    return false;
+  }
+
+  /** 立项研究（全局单线：有研究进行中/已研完/无研究所/付不起 均拒绝） */
+  startResearch(owner: 0 | 1, id: TechId): boolean {
+    const p = this.players[owner];
+    if (p.techs.includes(id) || p.research || !this.hasLab(owner)) return false;
+    const def = TECHS[id];
+    if (!this.canAfford(owner, def.cost)) return false;
+    this.payCost(owner, def.cost);
+    p.research = { id, remaining: def.time };
+    this.addLog('system', `开始研究：${def.name}`, owner);
+    return true;
+  }
+
+  /** 研究完成（construction在remaining<=0时调用） */
+  completeResearch(owner: 0 | 1): void {
+    const p = this.players[owner];
+    if (!p.research) return;
+    const t = p.research.id;
+    p.research = null;
+    if (!p.techs.includes(t)) p.techs.push(t);
+    this.addLog('system', `研究完成：${TECHS[t].name}（${TECHS[t].desc}）`, owner);
+  }
+
+  /** 地利加成（邻接系统）：农场临水/自动机傍仓库/炮台扼坡道。每5秒与建筑完工时重算 */
+  recomputeAdjacency(): void {
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'building' || !e.done || e.owner > 1) continue;
+      let bonus = 1, label = '';
+      const def = BUILDING_DEFS[e.defId];
+      if (e.defId === 'farm') {
+        // 占地外圈1格的水面格数
+        let water = 0;
+        for (let dy = -1; dy <= def.size; dy++) {
+          for (let dx = -1; dx <= def.size; dx++) {
+            const edge = dx < 0 || dy < 0 || dx >= def.size || dy >= def.size;
+            if (!edge) continue;
+            const x = e.tx + dx, y = e.ty + dy;
+            if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+            if (this.terrain[y * MAP_W + x] === T_WATER) water++;
+          }
+        }
+        if (water >= 5) { bonus = 1.20; label = '临水灌溉 +20%'; }
+        else if (water >= 2) { bonus = 1.10; label = '临水灌溉 +10%'; }
+      } else if (e.defId === 'lumber' || e.defId === 'mine') {
+        // 2格切比雪夫距离内有已建成仓库 → 就地中转
+        for (const o of this.entities.values()) {
+          if (o.kind !== 'building' || o.defId !== 'storehouse' || !o.done || o.owner !== e.owner) continue;
+          const d = Math.max(Math.abs(o.tx - e.tx), Math.abs(o.ty - e.ty), Math.abs(o.tx + 1 - e.tx - def.size), Math.abs(o.ty + 1 - e.ty - def.size));
+          if (d <= 2) { bonus = 1.10; label = '就地中转 +10%'; break; }
+        }
+      } else if (e.defId === 'turret') {
+        // 3格内有坡道 → 锁扼隘口
+        outer: for (let dy = -3; dy <= def.size + 2; dy++) {
+          for (let dx = -3; dx <= def.size + 2; dx++) {
+            const x = e.tx + dx, y = e.ty + dy;
+            if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+            if (this.terrain[y * MAP_W + x] === T_RAMP) { bonus = 1.20; label = '锁扼坡道 +20%'; break outer; }
+          }
+        }
+      }
+      if (label && e.adjLabel !== label) {
+        e.adjLabel = label;
+        e.adjBonus = bonus;
+        this.addLog('econ', `${def.name}获得地利：${label}`, e.owner);
+      } else if (!label && e.adjLabel) {
+        e.adjLabel = undefined;
+        e.adjBonus = undefined;
+      } else if (label) {
+        e.adjBonus = bonus;
+      }
+    }
   }
 
   // ================= 日志 =================
@@ -197,8 +327,61 @@ export class World {
 
   refreshWalkableAll(): void {
     for (let i = 0; i < this.walkable.length; i++) {
-      this.walkable[i] = (this.terrain[i] === T_GRASS || this.terrain[i] === T_RAMP || this.terrain[i] === T_FORD) ? 1 : 0;
+      this.walkable[i] = (this.terrain[i] === T_GRASS || this.terrain[i] === T_RAMP || this.terrain[i] === T_FORD || this.terrain[i] === T_FARM) ? 1 : 0;
     }
+  }
+
+  // ================= 麦田链（铺设→种植→生长→收割→入库→回种） =================
+
+  /** 铺设一块麦田（茬地）：仅草地、无建筑、无主。成功返回true（调用方负责扣钱） */
+  layFarm(tx: number, ty: number, owner: number): boolean {
+    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return false;
+    const i = ty * MAP_W + tx;
+    if (this.terrain[i] !== T_GRASS || this.occupied[i] || this.farmOwner[i] !== 0) return false;
+    this.terrain[i] = T_FARM;
+    this.farmOwner[i] = owner;
+    this.farmStage[i] = 0;
+    this.farmPlanted[i] = -1;
+    this.walkable[i] = 1;
+    this.farmTiles.add(i);
+    this.dirtyTiles.add(i);
+    return true;
+  }
+
+  /** 收割一块成熟麦田：结算地利加成，返回产量（同时变为茬地） */
+  harvestFarm(i: number, owner: number): number {
+    if (this.farmOwner[i] !== owner || this.farmStage[i] !== 3) return 0;
+    // 地利：临水灌溉 + 相邻麦田（农场三角）
+    let water = 0, farms = 0;
+    const tx = i % MAP_W, ty = (i / MAP_W) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const x = tx + dx, y = ty + dy;
+        if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+        const j = y * MAP_W + x;
+        if (this.terrain[j] === T_WATER) water++;
+        if (this.terrain[j] === T_FARM) farms++;
+      }
+    }
+    let mul = 1;
+    if (water >= 5) mul *= 1.2;
+    else if (water >= 2) mul *= 1.1;
+    mul *= 1 + Math.min(4, farms) * 0.05;
+    const amt = Math.round(FARM_YIELD * mul * this.mult(owner, 'gather'));
+    this.farmStage[i] = 0;
+    this.farmPlanted[i] = -1;
+    this.dirtyTiles.add(i);
+    return amt;
+  }
+
+  /** 回种一块茬地（收割入库后由农夫完成） */
+  plantFarm(i: number, owner: number): boolean {
+    if (this.farmOwner[i] !== owner || this.farmStage[i] !== 0 || this.farmPlanted[i] >= 0) return false;
+    this.farmPlanted[i] = this.time;
+    this.farmStage[i] = 1;
+    this.dirtyTiles.add(i);
+    return true;
   }
 
   /** 按单位层级查询通行性：air全图通（边界内），naval查水面网，land走高度规则 */
@@ -350,13 +533,13 @@ export class World {
     return this.canAfford(owner, cost);
   }
 
-  /** 人口：存活单位 + 排队中的单位 */
+  /** 人口：存活单位（按兵种占用权重）+ 排队中的单位 */
   recomputePop(): void {
     for (const owner of [0, 1] as const) {
       let pop = 0, cap = 0;
       for (const e of this.entities.values()) {
         if (e.owner !== owner) continue;
-        if (e.kind === 'unit') pop++;
+        if (e.kind === 'unit') pop += UNIT_DEFS[e.defId].pop ?? 1;
         else if (e.done) {
           const def = BUILDING_DEFS[e.defId];
           cap += def.popBonus ?? 0;
@@ -365,7 +548,7 @@ export class World {
       }
       const p = this.players[owner];
       p.pop = pop;
-      p.popCap = Math.min(POP_MAX, POP_BASE + cap);
+      p.popCap = Math.min(POP_MAX, POP_BASE + cap + (p.edict === 'logistics' ? LOGISTICS_POP : 0));
     }
   }
 

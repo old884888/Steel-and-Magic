@@ -2,6 +2,7 @@ import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { dist } from '../engine/spatialHash';
 import { FOG_SCAN_INTERVAL, HEIGHT_RANGE_BONUS, HEIGHT_DAMAGE_BONUS, DMG_MATRIX } from '../config';
+import { COMPOSITE_MITIGATION } from '../data/policies';
 import type { World } from './world';
 import type { Entity } from './entity';
 import type { WeaponDef, Res } from '../types';
@@ -50,6 +51,41 @@ export function updateCombat(w: World, dt: number): void {
   for (const e of w.entities.values()) {
     const weapon = weaponOf(e);
     if (e.cooldown > 0) e.cooldown -= dt;
+
+    // ---- 舷侧机枪（坦克/指挥基地）：固定双联，独立索敌/冷却，与主武器互不干扰，行进间照射 ----
+    const mg = e.kind === 'unit' ? UNIT_DEFS[e.defId].mg : BUILDING_DEFS[e.defId].mg;
+    if (mg && e.done) {
+      e.mgCooldown = (e.mgCooldown ?? 0) - dt;
+      if (e.mgCooldown <= 0) {
+        const t = nearestEnemy(w, e, mg.range, true, mg.targetsAir === true);
+        if (t) {
+          const perp = e.angle + Math.PI / 2;
+          const off = Math.max(9, e.radius() * 0.55); // 建筑：枪巢布置在角落
+          const spread = mg.spread ?? 4;
+          const aim = Math.atan2(t.y - e.y, t.x - e.x);
+          for (const side of [1, -1] as const) {
+            const mx = e.x + Math.cos(perp) * off * side;
+            const my = e.y + Math.sin(perp) * off * side;
+            w.projectiles.push({
+              x: mx, y: my,
+              tx: t.x + (Math.random() - 0.5) * 2 * spread,
+              ty: t.y + (Math.random() - 0.5) * 2 * spread,
+              speed: PROJ_SPEED[mg.projectile],
+              damage: mg.damage,
+              splash: 0,
+              hitRadius: 10,
+              targetsAir: mg.targetsAir === true,
+              kind: mg.projectile,
+              owner: e.owner,
+              aimId: t.id,
+              travel: 0,
+            });
+            w.addFx(mx, my, 'muzzle', 5, 0.08, aim);
+          }
+          e.mgCooldown = mg.cooldown;
+        }
+      }
+    }
 
     // ---- 错峰索敌扫描 ----
     const doScan = (w.tick + e.id) % FOG_SCAN_INTERVAL === 0;
@@ -300,6 +336,8 @@ export function damage(w: World, target: Entity, amount: number, fromOwner?: num
     const armor = armorOf(target);
     remaining *= (DMG_MATRIX[dmgType]?.[armor] ?? 1);
   }
+  // 复合装甲科技：目标全军受伤减免
+  if (target.owner <= 1 && w.players[target.owner].techs.includes('composite')) remaining *= COMPOSITE_MITIGATION;
 
   target.hp -= remaining;
 

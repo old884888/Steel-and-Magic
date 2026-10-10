@@ -3,6 +3,8 @@
  * 设计心法（移植自铁锈战争ini的aiPriority）：AI只认通用规则，"想造什么/怎么打"全部长在数据里。
  */
 
+import type { TechId } from '../data/policies';
+
 export type DifficultyId = 'easy' | 'standard' | 'hard' | 'nightmare' | 'custom';
 export type PersonalityId = 'balanced' | 'rusher' | 'turtler' | 'eco';
 export type TacticId = 'focusFire' | 'retreat' | 'spareArtillery' | 'highGround' | 'weiwei' | 'denyMining' | 'counterComp';
@@ -86,19 +88,19 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityPack> = {
   },
   rusher: {
     name: '莽夫', line: '让他们见识钢铁的怒火！',
-    weights: { infantry: 2.0, tank: 0.8, artillery: 0.4, farm: 0.7, turret: 0.3, factory: 0.7, storehouse: 0.6, barracks: 1.6 },
+    weights: { infantry: 2.0, tank: 0.8, artillery: 0.4, farm: 0.7, turret: 0.3, factory: 0.7, storehouse: 0.6, barracks: 1.6, lab: 0.5 },
     targetMul: { barracks: 1.5, turret: 0.5, farm: 0.8 },
     waveSizeMul: 0.7, attackCdMul: 0.55,
   },
   turtler: {
     name: '乌龟', line: '来吧，撞碎在城墙上',
-    weights: { turret: 2.5, artillery: 1.8, farm: 1.3, infantry: 0.6, lumber: 0.9, barracks: 1.2 },
+    weights: { turret: 2.5, artillery: 1.8, farm: 1.3, infantry: 0.6, lumber: 0.9, barracks: 1.2, lab: 1.3 },
     targetMul: { turret: 3.0, factory: 0.8 },
     waveSizeMul: 1.6, attackCdMul: 1.5,
   },
   eco: {
     name: '种田', line: '耐心是最大的武器',
-    weights: { lumber: 1.6, mine: 1.6, factory: 1.4, tank: 1.3, farm: 1.2, infantry: 0.5, turret: 0.7, barracks: 0.6 },
+    weights: { lumber: 1.6, mine: 1.6, factory: 1.4, tank: 1.3, farm: 1.2, infantry: 0.5, turret: 0.7, barracks: 0.6, lab: 1.5 },
     targetMul: { lumber: 1.5, mine: 1.4, farm: 1.2 },
     waveSizeMul: 1.4, attackCdMul: 1.8,
   },
@@ -106,7 +108,15 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityPack> = {
 
 /** 建筑目标数量基准（×性格targetMul = 实际上限） */
 export const BASE_BUILD_TARGETS: Record<string, number> = {
-  builder: 2, farm: 7, lumber: 2, mine: 3, storehouse: 4, barracks: 2, factory: 2, turret: 2, hq: 1,
+  builder: 2, farm: 7, lumber: 2, mine: 3, storehouse: 4, barracks: 2, factory: 2, turret: 2, lab: 1, hq: 1,
+};
+
+/** 性格科研队列：按顺序研究第一项未完成的 */
+export const RESEARCH_QUEUES: Record<PersonalityId, TechId[]> = {
+  balanced: ['sawBlades', 'shells', 'deepStorage'],
+  rusher: ['shells', 'fireControl', 'sawBlades'],
+  turtler: ['assembly', 'composite', 'fireControl'],
+  eco: ['sawBlades', 'deepStorage', 'assembly'],
 };
 
 export interface AISettings {

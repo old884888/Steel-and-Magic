@@ -1,4 +1,4 @@
-import { TILE, OWNER_PLAYER, OWNER_ENEMY, SIM_DT, T_TREE, T_ORE } from './config';
+import { TILE, MAP_W, MAP_H, OWNER_PLAYER, OWNER_ENEMY, SIM_DT, T_TREE, T_ORE, FARM_COST_WOOD } from './config';
 import { UNIT_DEFS } from './data/units';
 import { BUILDING_DEFS } from './data/buildings';
 import type { Entity } from './sim/entity';
@@ -58,6 +58,7 @@ export class Game {
       onAttackMoveClick: (pos) => this.attackMoveAt(pos),
       onDoubleClickSelect: (pos) => this.doubleClickSelect(pos),
       onHotkey: (k) => this.handleHotkey(k),
+      onPaintCommit: (a, b) => this.paintFarms(a, b),
       onCancel: () => { this.placement = null; },
     });
 
@@ -76,26 +77,46 @@ export class Game {
       (dt) => this.simStep(dt),
       () => this.renderFrame(),
     );
+
+    // 关页/切后台兜底：日志立刻落盘，下次打开随时可查
+    const flushLog = () => this.world.log.maybeFlush(true);
+    window.addEventListener('pagehide', flushLog);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) flushLog(); });
   }
 
   // ================= 模拟 =================
 
   private simStep(dt: number): void {
     simTick(this.world, dt, [this.aiPlayer, this.aiEnemy]);
+    this.world.log.maybeFlush(); // 日志节流落盘（内部5秒一写）
     this.renderer.patchDirty();
     for (const i of this.world.dirtyTiles) this.minimap.patchTile(i);
     if (this.world.gameOver !== 0 && !this.gameShown) {
       this.gameShown = true;
+      this.world.log.maybeFlush(true); // 终局日志立刻落盘
       this.hud.showGameOver(this.world.gameOver === 1, this.world.time);
     }
   }
 
   private renderFrame(): void {
-    // 键盘平移
+    // 键盘平移 + 屏幕边缘滚屏（光标贴边等同方向键）
     const axis = this.input.panAxis();
-    if (axis.x !== 0 || axis.y !== 0) {
+    const edge = this.input.edgePanAxis();
+    const px = axis.x + edge.x, py = axis.y + edge.y;
+    if (px !== 0 || py !== 0) {
       const speed = 520 / this.cam.zoom * SIM_DT * 3;
-      this.cam.pan(axis.x * speed, axis.y * speed);
+      this.cam.pan(px * speed, py * speed);
+    }
+    // 铺设拖框的格范围（渲染层画预览）
+    let paintTiles: { x0: number; y0: number; x1: number; y1: number } | null = null;
+    if (this.input.paintMode && this.input.paintRect) {
+      const r = this.input.paintRect;
+      const wa = this.cam.screenToWorld(Math.min(r.ax, r.bx), Math.min(r.ay, r.by));
+      const wb = this.cam.screenToWorld(Math.max(r.ax, r.bx), Math.max(r.ay, r.by));
+      paintTiles = {
+        x0: Math.max(0, Math.floor(wa.x / TILE)), y0: Math.max(0, Math.floor(wa.y / TILE)),
+        x1: Math.min(MAP_W - 1, Math.floor(wb.x / TILE)), y1: Math.min(MAP_H - 1, Math.floor(wb.y / TILE)),
+      };
     }
     // 放置幽灵实时校验
     let placementView: PlacementView | null = null;
@@ -108,7 +129,7 @@ export class Game {
       placementView = { defId: this.placement.defId, tx, ty, valid: r.ok, reason: r.reason };
       this.placement.view = placementView;
     }
-    this.renderer.render(this.cam, this.selection, placementView, this.input.dragBox);
+    this.renderer.render(this.cam, this.selection, placementView, this.input.dragBox, paintTiles);
     this.minimap.draw();
     this.hud.update(SIM_DT * 3);
   }
@@ -129,8 +150,14 @@ export class Game {
     const wb = this.cam.screenToWorld(Math.max(a.x, b.x), Math.max(a.y, b.y));
     const found: number[] = [];
     for (const e of this.world.entities.values()) {
-      if (e.kind !== 'unit' || e.owner !== OWNER_PLAYER) continue;
-      if (e.x >= wa.x && e.x <= wb.x && e.y >= wa.y && e.y <= wb.y) found.push(e.id);
+      if (e.owner !== OWNER_PLAYER) continue;
+      if (e.kind === 'unit') {
+        if (e.x >= wa.x && e.x <= wb.x && e.y >= wa.y && e.y <= wb.y) found.push(e.id);
+      } else if (e.kind === 'building' && e.done) {
+        // 建筑：中心点入框即选（支持框选多座同类型建筑批量生产）
+        const c = e.center();
+        if (c.x >= wa.x && c.x <= wb.x && c.y >= wa.y && c.y <= wb.y) found.push(e.id);
+      }
     }
     if (!additive) this.selection.clear();
     for (const id of found) this.selection.add(id);
@@ -139,6 +166,23 @@ export class Game {
   // ================= 指令 =================
 
   private contextOrder(pos: { x: number; y: number }): void {
+    // 选中生产建筑（且无部队）时：右键=快速设置集结点
+    if (this.liveUnitIds().length === 0) {
+      const bsel = [...this.selection].filter(id => {
+        const e = this.world.entities.get(id);
+        return e?.kind === 'building' && e.done && !!BUILDING_DEFS[e.defId].produces;
+      });
+      if (bsel.length > 0) {
+        for (const id of bsel) {
+          const b = this.world.entities.get(id)!;
+          b.rally = { x: pos.x, y: pos.y };
+        }
+        this.world.addFx(pos.x, pos.y, 'mark', 0, 1.2, undefined, '⚑ 集结', '#7dc4ff');
+        this.hud.toast(`集结点已设置（${bsel.length}座建筑）`);
+        return;
+      }
+    }
+
     const ids = [...this.selection].filter(id => {
       const e = this.world.entities.get(id);
       return e?.kind === 'unit' && e.owner === OWNER_PLAYER;
@@ -231,10 +275,10 @@ export class Game {
     }
   }
 
-  /** 双击单位：选中屏幕内所有同类 */
+  /** 双击：选中屏幕内所有同类（单位或建筑） */
   private doubleClickSelect(pos: { x: number; y: number }): void {
     const picked = this.world.pickAt(pos.x, pos.y);
-    if (!picked || picked.kind !== 'unit' || picked.owner !== OWNER_PLAYER) return;
+    if (!picked || picked.owner !== OWNER_PLAYER) return;
     // 屏幕四角反推世界范围
     const c0 = this.cam.screenToWorld(0, 0);
     const c1 = this.cam.screenToWorld(this.cam.viewW, this.cam.viewH);
@@ -242,10 +286,14 @@ export class Game {
     const y0 = Math.min(c0.y, c1.y), y1 = Math.max(c0.y, c1.y);
     this.selection.clear();
     for (const e of this.world.entities.values()) {
-      if (e.kind !== 'unit' || e.owner !== OWNER_PLAYER || e.defId !== picked.defId) continue;
+      if (e.owner !== OWNER_PLAYER || e.defId !== picked.defId) continue;
       if (e.x >= x0 && e.x <= x1 && e.y >= y0 && e.y <= y1) this.selection.add(e.id);
     }
-    this.hud.toast(`已选中屏幕内全部${UNIT_DEFS[picked.defId].name}（${this.selection.size}个）`);
+    if (picked.kind === 'unit' && this.selection.size > 0) {
+      this.hud.toast(`已选中屏幕内全部${UNIT_DEFS[picked.defId].name}（${this.selection.size}个）`);
+    } else if (this.selection.size > 1) {
+      this.hud.toast(`已选中屏幕内全部${picked.defId === 'hq' ? '指挥基地' : '同类建筑'}（${this.selection.size}座）`);
+    }
   }
 
   /** 攻击移动落点 */
@@ -298,14 +346,46 @@ export class Game {
   }
 
   queueUnit(unitId: string): void {
-    // 选中建筑排产
+    // 多选同类型建筑批量排产：点击一次，每座各排1个（资源不足即停）
+    let ok = 0, attempted = 0;
     for (const id of this.selection) {
       const e = this.world.entities.get(id);
       if (e?.kind === 'building' && e.done && BUILDING_DEFS[e.defId].produces?.includes(unitId)) {
-        this.hud.enqueue(id, unitId);
-        return;
+        attempted++;
+        if (this.hud.enqueue(id, unitId)) ok++;
+        else break;
       }
     }
+    if (ok > 1) this.hud.toast(`已向 ${ok} 座建筑下单`);
+    else if (attempted === 0) this.hud.toast('选中建筑无法生产该单位');
+  }
+
+  /** 麦田铺设模式：拖框开垦（木5/格） */
+  startPaint(): void {
+    this.input.placementMode = false;
+    this.input.attackMoveMode = false;
+    this.placement = null;
+    this.input.paintMode = true;
+    this.hud.toast('铺设模式：拖框开垦麦田（木5/格），右键取消');
+  }
+
+  private paintFarms(a: { x: number; y: number }, b: { x: number; y: number }): void {
+    const wa = this.cam.screenToWorld(Math.min(a.x, b.x), Math.min(a.y, b.y));
+    const wb = this.cam.screenToWorld(Math.max(a.x, b.x), Math.max(a.y, b.y));
+    const x0 = Math.max(1, Math.floor(wa.x / TILE)), y0 = Math.max(1, Math.floor(wa.y / TILE));
+    const x1 = Math.min(MAP_W - 2, Math.floor(wb.x / TILE)), y1 = Math.min(MAP_H - 2, Math.floor(wb.y / TILE));
+    let n = 0;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (!this.world.canAfford(OWNER_PLAYER, { wood: FARM_COST_WOOD })) break;
+        if (this.world.layFarm(tx, ty, OWNER_PLAYER)) {
+          this.world.payCost(OWNER_PLAYER, { wood: FARM_COST_WOOD });
+          n++;
+        }
+      }
+    }
+    if (n > 0) this.hud.toast(`开垦 ${n} 块麦田（待农夫耕种）`);
+    else this.hud.toast('没有可开垦的草地（或木头不足）');
   }
 
   clearRallyHint(): void { void 0; }

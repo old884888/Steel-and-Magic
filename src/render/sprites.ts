@@ -1,4 +1,4 @@
-import { TILE, PALETTES, METAL, METAL_DARK, COLORS, T_GRASS, T_WATER, T_TREE, T_ORE, T_RAMP, T_FORD } from '../config';
+import { TILE, PALETTES, METAL, METAL_DARK, COLORS, T_GRASS, T_WATER, T_TREE, T_ORE, T_RAMP, T_FORD, T_FARM } from '../config';
 
 /**
  * 运行时程序化贴图生成器 —— 全部单位/建筑/地块贴图在浏览器离屏Canvas上绘制并缓存。
@@ -128,6 +128,26 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':t', turret);
         break;
       }
+      case 'farmer': {
+        // 车体…不对，是人体：粗布衣+草帽的田间劳作者
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(18, 18);
+        circle(ctx, 9, 10, 6, p.primary);
+        ctx.fillStyle = '#e8c9a0';
+        circle(ctx, 9, 6.5, 2, '#e8c9a0');
+        ctx.fillStyle = '#d8b545';                       // 草帽
+        ctx.beginPath(); ctx.ellipse(9, 4.6, 6.8, 2.3, 0, 0, Math.PI * 2); ctx.fill();
+        circle(ctx, 9, 4.2, 2.5, '#c9a53c');
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(18, 8);
+        tc.fillStyle = '#6b4f2a';                        // 锄头柄
+        tc.fillRect(3, 3.2, 12, 2);
+        tc.fillStyle = '#8a919c';                        // 锄头铁头
+        tc.fillRect(13, 1.8, 3.4, 4.4);
+        cache.set(key + ':t', turret);
+        break;
+      }
       case 'tank': {
         let ctx: CanvasRenderingContext2D;
         [hull, ctx] = mk(46, 36);
@@ -169,6 +189,12 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         // 划痕
         ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 0.5;
         ctx.beginPath(); ctx.moveTo(14, 20); ctx.lineTo(30, 14); ctx.stroke();
+        // 舷侧机枪座（左右各一，独立于主炮，射步兵弹）
+        ctx.fillStyle = '#2c2f34';
+        ctx.fillRect(13, 7.4, 6, 1.8);
+        ctx.fillRect(13, 26.8, 6, 1.8);
+        circle(ctx, 12.5, 8.3, 1.4, METAL_DARK);
+        circle(ctx, 12.5, 27.7, 1.4, METAL_DARK);
         cache.set(key + ':h', hull);
         // 炮塔：渐变装甲+描边+高光
         let tc: CanvasRenderingContext2D;
@@ -428,9 +454,24 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         circle(ctx, S / 2, 13, 3, '#ff5e4e');
         // 大门
         rr(ctx, S / 2 - 10, S - 20, 20, 12, 2, '#20242a');
+        // 舷侧机枪巢（左右下角，独立开火，可对空）
+        rr(ctx, 14, S - 24, 13, 9, 2, '#2c2f34');
+        rr(ctx, S - 27, S - 24, 13, 9, 2, '#2c2f34');
+        circle(ctx, 20, S - 19.5, 2, '#4a5560');
+        circle(ctx, S - 20, S - 19.5, 2, '#4a5560');
         // 阵营徽带
         ctx.fillStyle = p.primary;
         ctx.fillRect(10, 8, S - 20, 5);
+        // 防卫炮塔（随目标旋转，火炮对空对地溅射）
+        let tc: CanvasRenderingContext2D;
+        [top, tc] = mk(38, 20);
+        circle(tc, 9, 10, 8.5, METAL);
+        circle(tc, 9, 10, 5.5, p.primary);
+        circle(tc, 9, 10, 2.4, p.dark);
+        tc.fillStyle = '#2c2f34';
+        tc.fillRect(15, 8.4, 18, 3.2);
+        tc.fillStyle = METAL_DARK;
+        tc.fillRect(13, 7, 3.4, 6);
         break;
       }
       case 'farm': {
@@ -651,6 +692,27 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         ctx.fillRect(8, 2, 10, 5);
         break;
       }
+      case 'lab': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#3d444e');            // 混凝土基座
+        rr(ctx, 6, 6, S - 12, S - 12, 6, METAL_DARK);
+        rr(ctx, 10, 10, S - 20, S - 20, 5, p.secondary);
+        // 圆顶主楼（观测站）
+        circle(ctx, S / 2, S / 2 + 3, 16, p.primary);
+        circle(ctx, S / 2, S / 2 + 3, 11, '#c9d4e0');
+        circle(ctx, S / 2 - 3, S / 2 - 1, 4, 'rgba(255,255,255,.5)');
+        // 碟形天线
+        ctx.strokeStyle = METAL; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(S - 16, 16, 8, Math.PI * 0.15, Math.PI * 1.05); ctx.stroke();
+        ctx.strokeStyle = '#20242a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(S - 16, 16); ctx.lineTo(S - 16, 26); ctx.stroke();
+        // 状态灯
+        circle(ctx, 14, S - 14, 2.5, '#7dff7d');
+        circle(ctx, 22, S - 14, 2.5, '#ffd76e');
+        // 阵营徽带
+        ctx.fillStyle = p.primary;
+        ctx.fillRect(8, 8, S - 16, 4);
+        break;
+      }
     }
     cache.set(key + ':b', base);
     if (top) cache.set(key + ':t', top);
@@ -658,7 +720,7 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
   return { base, top };
 }
 
-const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, barracks: 3, factory: 3, turret: 1 };
+const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, barracks: 3, factory: 3, turret: 1 };
 
 // ================= 地块 =================
 
@@ -762,7 +824,7 @@ export function drawWreck(ctx: CanvasRenderingContext2D, kind: 'corpse' | 'vehic
   ctx.restore();
 }
 
-export function drawTerrainTile(ctx: CanvasRenderingContext2D, kind: number, px: number, py: number, i: number, h = 0): void {
+export function drawTerrainTile(ctx: CanvasRenderingContext2D, kind: number, px: number, py: number, i: number, h = 0, farmStage = -1): void {
   const hh = Math.max(0, Math.min(3, h));
   const n = hashIdx(i);
   if (kind === T_GRASS || kind === T_RAMP) {
@@ -771,6 +833,32 @@ export function drawTerrainTile(ctx: CanvasRenderingContext2D, kind: number, px:
     ctx.fillStyle = COLORS.grassNoise[n % 3];
     ctx.fillRect(px + (n % 7) * 4, py + ((n >> 3) % 7) * 4, 3, 3);
     ctx.fillRect(px + ((n >> 6) % 7) * 4, py + ((n >> 9) % 7) * 4, 2, 2);
+  } else if (kind === T_FARM) {
+    // 麦田：耕地棕底+田垄，按生长段位铺作物（0茬地/1苗/2青/3金）
+    ctx.fillStyle = '#6d5636';
+    ctx.fillRect(px, py, TILE, TILE);
+    ctx.strokeStyle = 'rgba(0,0,0,.18)';
+    ctx.lineWidth = 1;
+    for (let k = 0; k < 4; k++) {
+      ctx.beginPath(); ctx.moveTo(px + 3, py + 6.5 + k * 7); ctx.lineTo(px + TILE - 3, py + 6.5 + k * 7); ctx.stroke();
+    }
+    if (farmStage === 0) {
+      // 茬地：收割后的短秸秆
+      ctx.fillStyle = 'rgba(215,195,125,.45)';
+      for (let k = 0; k < 6; k++) ctx.fillRect(px + 4 + ((i >> k) % 6) * 4.6, py + 5 + ((i >> (k + 2)) % 6) * 4.4, 2, 2);
+    } else if (farmStage === 1) {
+      ctx.fillStyle = '#7fbf5f';
+      for (let k = 0; k < 4; k++) for (let m = 0; m < 3; m++) ctx.fillRect(px + 6 + m * 9 + (k % 2) * 2, py + 6 + k * 7, 2, 3);
+    } else if (farmStage === 2) {
+      ctx.fillStyle = '#9ecb4f';
+      for (let k = 0; k < 4; k++) for (let m = 0; m < 3; m++) ctx.fillRect(px + 6 + m * 9 + (k % 2) * 2, py + 4 + k * 7, 2.4, 6);
+    } else {
+      // 成熟：金黄麦穗
+      ctx.fillStyle = '#d8a838';
+      for (let k = 0; k < 4; k++) for (let m = 0; m < 3; m++) ctx.fillRect(px + 5.5 + m * 9 + (k % 2) * 2, py + 3 + k * 7, 3, 8);
+      ctx.fillStyle = '#f5d97a';
+      for (let k = 0; k < 4; k++) for (let m = 0; m < 3; m++) ctx.fillRect(px + 6 + m * 9 + (k % 2) * 2, py + 2 + k * 7, 2, 3);
+    }
   } else if (kind === T_WATER) {
     ctx.fillStyle = COLORS.water;
     ctx.fillRect(px, py, TILE, TILE);

@@ -26,7 +26,7 @@ export interface Entity {
   stuck: number;            // 卡死累计位移（重寻路用）
 
   // ---- 采集字段（工程车） ----
-  cargo: { res: 'wood' | 'ore'; amt: number } | null;
+  cargo: { res: 'wood' | 'ore' | 'wheat'; amt: number } | null;
   gatherState: 'toRes' | 'gathering' | 'toDepot' | 'deposit' | null;
   resTile: number;          // 目标资源格
   resExhausted: boolean;    // 资源枯竭标记：卸完货就地待命
@@ -61,6 +61,22 @@ export interface Entity {
   linkedTile: number;       // 伐木站目标树格 / 采矿场矿格（-1无）
   buffer: number;           // 自动机内部缓冲仓当前储量
   bufferStalled: boolean;   // 满仓停机标记（展示用）
+
+  // ---- 运营深度系统（建筑可选字段） ----
+  adjBonus?: number;        // 地利加成乘数缓存（邻接系统重算）
+  adjLabel?: string;        // 地利文案（面板展示）
+  boostUntil?: number;      // 富矿脉事件：产量×2截止时间
+
+  // ---- 建造师赶路失败计时（施工中不在射程且无路径的累计秒，超时弃单） ----
+  buildWait?: number;
+
+  // ---- 农夫耕作（麦田链） ----
+  farmState?: 'toHarvest' | 'toDepot' | 'toPlant' | null;  // 当前工序
+  farmTile?: number;        // 目标麦田格（收割/回种共用，收割后保留用于回种）
+  jobT?: number;            // 收割/回种动作计时（>0=正在干活）
+
+  // ---- 舷侧机枪 ----
+  mgCooldown?: number;      // 机枪独立冷却（与主炮互不干扰）
 
   /** 世界坐标下的碰撞半径（建筑=格尺寸一半） */
   radius(): number;

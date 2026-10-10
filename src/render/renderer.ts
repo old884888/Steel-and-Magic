@@ -1,4 +1,4 @@
-import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER } from '../config';
+import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, T_FARM, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import type { World } from '../sim/world';
@@ -61,7 +61,7 @@ export class Renderer {
     const dy = this.tileY(py, h);
     ctx.save();
     ctx.translate(0, dy - py);
-    drawTerrainTile(ctx, kind, px, py, i, h);
+    drawTerrainTile(ctx, kind, px, py, i, h, kind === T_FARM ? this.world.farmStage[i] : -1);
     if (kind === T_TREE) {
       const spr = getTreeSprite(i * 7 + 3);
       ctx.drawImage(spr, px + TILE / 2 - spr.width / 2, py + TILE / 2 - spr.height / 2);
@@ -127,7 +127,7 @@ export class Renderer {
   /** 注入系统缩放比（在fitCanvas时调用），画布底层像素 = CSS尺寸 × dpr */
   setDpr(dpr: number): void { this.dpr = dpr; }
 
-  render(cam: Camera, sel: Set<number>, placement: PlacementView | null, dragBox: { ax: number; ay: number; bx: number; by: number } | null): void {
+  render(cam: Camera, sel: Set<number>, placement: PlacementView | null, dragBox: { ax: number; ay: number; bx: number; by: number } | null, paintTiles?: { x0: number; y0: number; x1: number; y1: number } | null): void {
     const ctx = this.ctx;
     const { viewW, viewH, zoom } = cam;
 
@@ -144,6 +144,22 @@ export class Renderer {
 
     // 地形（画布自带顶部预留，向上一吐为快）
     ctx.drawImage(this.terrainC, 0, -TOPAD);
+
+    // 麦田铺设预览：金色=可开垦，暗红=不可
+    if (paintTiles) {
+      for (let ty = paintTiles.y0; ty <= paintTiles.y1; ty++) {
+        for (let tx = paintTiles.x0; tx <= paintTiles.x1; tx++) {
+          const i = ty * MAP_W + tx;
+          const ok = this.world.terrain[i] === T_GRASS && !this.world.occupied[i] && this.world.farmOwner[i] === 0;
+          const fy = this.tileY(ty * TILE, this.world.height[i]);
+          ctx.fillStyle = ok ? 'rgba(240,200,90,.30)' : 'rgba(200,70,50,.28)';
+          ctx.fillRect(tx * TILE, fy, TILE, TILE);
+          ctx.strokeStyle = ok ? 'rgba(255,220,120,.75)' : 'rgba(255,110,90,.6)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(tx * TILE + 0.5, fy + 0.5, TILE - 1, TILE - 1);
+        }
+      }
+    }
 
     // ---- 地面火区（橙红闪烁+烟雾粒） ----
     for (const fz of this.world.fireZones) {
@@ -272,6 +288,27 @@ export class Renderer {
     this.effects.draw(ctx, this.world);
 
     // ---- 迷雾（随高度抬升） ----
+    // 集结点旗（选中的生产建筑）：细线连接建筑→旗，认得出是哪个建筑的
+    for (const id of sel) {
+      const b = this.world.entities.get(id);
+      if (!b || b.kind !== 'building' || !b.done || !b.rally) continue;
+      if (!BUILDING_DEFS[b.defId].produces) continue;
+      const r = b.rally;
+      const hOff = this.world.heightAt(b.x, b.y) * HEIGHT_OFFSET;
+      ctx.setLineDash([3, 5]);
+      ctx.strokeStyle = 'rgba(240,166,60,.55)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(b.x, b.y - hOff); ctx.lineTo(r.x, r.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#1a2530';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(r.x, r.y - 2); ctx.lineTo(r.x, r.y - 22); ctx.stroke();
+      ctx.fillStyle = '#f0a63c';
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y - 22); ctx.lineTo(r.x + 12, r.y - 18); ctx.lineTo(r.x, r.y - 14);
+      ctx.closePath(); ctx.fill();
+    }
+
     this.drawFog();
     ctx.drawImage(this.fogC, 0, -TOPAD);
 

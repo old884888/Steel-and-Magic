@@ -4,13 +4,14 @@ import { MAP_W, MAP_H, TILE, T_ORE, T_TREE } from '../config';
 import { dist } from '../engine/spatialHash';
 import type { World } from './world';
 import type { Entity } from './entity';
-import { standardAIConfig, BASE_BUILD_TARGETS, type AIConfig } from './ai-config';
+import { standardAIConfig, BASE_BUILD_TARGETS, RESEARCH_QUEUES, type AIConfig } from './ai-config';
+import type { EdictId } from '../data/policies';
 import { rankProduction } from './ai-priority';
 import { takeSnapshot, applyRetreat, applySpareArtillery, findHighGroundNear, counterCompWeights, isRetreating, type AISnapshot, type TacticCtx } from './ai-tactics';
 import { tryEnqueue } from './construction';
 
 /** 单位存量上限（性格权重决定"想不想要"，这里是"最多要多少"） */
-const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2 };
+const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, farmer: 0 }; // 农夫=玩家侧麦田链专属，AI暂不采用
 
 /**
  * AI指挥官：每 cfg.thinkSec 秒醒来一次。
@@ -53,6 +54,18 @@ export class AIController {
     const army = snap.army;
     const tacticOn = (id: string): boolean => this.cfg.tactics.includes(id as never);
 
+    // ---- 法令与科研（性格驱动，与玩家完全同规则） ----
+    const me = w.players[this.owner];
+    const wantEdict: EdictId = this.cfg.personalityId === 'rusher' ? 'military'
+      : this.cfg.personalityId === 'turtler' ? 'engineering'
+      : this.cfg.personalityId === 'eco' ? 'economy'
+      : (w.time > 480 ? 'military' : 'economy'); // 均衡：前期种田，8分钟后转军事
+    if (me.edict !== wantEdict && me.edictCd <= 0) w.setEdict(this.owner, wantEdict);
+    if (!me.research) {
+      const next = RESEARCH_QUEUES[this.cfg.personalityId].find(id => !me.techs.includes(id));
+      if (next) w.startResearch(this.owner, next);
+    }
+
     // ---- 战术模块（并行正交：撤退/保炮车/克制配兵修正） ----
     if (tacticOn('retreat')) applyRetreat(ctx);
     if (tacticOn('spareArtillery')) applySpareArtillery(ctx);
@@ -77,21 +90,25 @@ export class AIController {
     // ---- 建造（优先级驱动 + 找空地，找不到就试次优） ----
     const idleBuilder = snap.myUnits.find(u => u.defId === 'builder' && u.order.kind === 'idle');
     if (idleBuilder) {
-      const buildable = UNIT_DEFS['builder'].canBuild ?? [];
-      const ranked = rankProduction(
-        buildable.map(defId => ({ defId, kind: 'building' as const, need: 1 })),
-        this.cfg.weights,
-        id => this.buildNeed(snap, id),
-      );
-      for (const c of ranked) {
-        const def = BUILDING_DEFS[c.defId];
-        if (!w.canAfford(this.owner, def.cost)) continue;
-        const spot = this.findSpot(w, c.defId, hq);
-        if (!spot) continue;
-        w.payCost(this.owner, def.cost);
-        const site = w.spawnBuilding(c.defId, this.owner, spot.tx, spot.ty, false);
-        w.issueBuild([idleBuilder.id], site.id);
-        break;
+      // 从建造师脚下洪泛出可达集：工地必须建在"走得到"的地方（防把建造师锁死在孤岛上）
+      const reach = this.reachSet(w, idleBuilder);
+      if (reach) {
+        const buildable = UNIT_DEFS['builder'].canBuild ?? [];
+        const ranked = rankProduction(
+          buildable.map(defId => ({ defId, kind: 'building' as const, need: 1 })),
+          this.cfg.weights,
+          id => this.buildNeed(snap, id),
+        );
+        for (const c of ranked) {
+          const def = BUILDING_DEFS[c.defId];
+          if (!w.canAfford(this.owner, def.cost)) continue;
+          const spot = this.findSpot(w, c.defId, hq, reach);
+          if (!spot) continue;
+          w.payCost(this.owner, def.cost);
+          const site = w.spawnBuilding(c.defId, this.owner, spot.tx, spot.ty, false);
+          w.issueBuild([idleBuilder.id], site.id);
+          break;
+        }
       }
     }
 
@@ -207,7 +224,11 @@ export class AIController {
       case 'barracks':
         return count === 0 ? 1.5 : 0.7;
       case 'factory':
-        return snap.myBuildings.some(b => b.defId === 'barracks' && b.done) ? 1.2 : 0.05;
+        // 兵营建成后备战升级要趁早（否则永远被农场/仓库插队）
+        return snap.myBuildings.some(b => b.defId === 'barracks' && b.done) ? 1.5 : 0.05;
+      case 'lab':
+        // 2.5分钟后想要一座立项科研（种田/乌龟性格靠weights加码）
+        return count === 0 ? (snap.time > 150 ? 1.8 : 0.05) : 0;
       case 'turret':
         return 0.5;
       default:
@@ -255,9 +276,38 @@ export class AIController {
     return best;
   }
 
-  /** 找建造位置：矿场找矿脉、伐木找树丛、普通建筑绕HQ螺旋 */
-  private findSpot(w: World, defId: string, hq: Entity): { tx: number; ty: number } | null {
+  /** 从单位所在格高度感知洪泛，返回可达可站格集合（建造选址用） */
+  private reachSet(w: World, from: Entity): Set<number> | null {
+    const start = Math.floor(from.y / TILE) * MAP_W + Math.floor(from.x / TILE);
+    if (start < 0 || start >= MAP_W * MAP_H || !w.walkable[start]) return null;
+    const seen = new Set<number>([start]);
+    const stack: number[] = [start];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      const cx = cur % MAP_W, cy = (cur / MAP_W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+        const ni = ny * MAP_W + nx;
+        if (!seen.has(ni) && w.canStand(cur, ni)) { seen.add(ni); stack.push(ni); }
+      }
+    }
+    return seen;
+  }
+
+  /** 找建造位置：矿场找矿脉、伐木找树丛、普通建筑绕HQ螺旋；reach给定时要求足迹至少一格可达 */
+  private findSpot(w: World, defId: string, hq: Entity, reach?: Set<number>): { tx: number; ty: number } | null {
     const def = BUILDING_DEFS[defId];
+    const okSpot = (tx: number, ty: number): boolean => {
+      if (!w.canPlace(defId, tx, ty).ok) return false;
+      if (!reach) return true;
+      for (let dy = 0; dy < def.size; dy++) {
+        for (let dx = 0; dx < def.size; dx++) {
+          if (reach.has((ty + dy) * MAP_W + tx + dx)) return true;
+        }
+      }
+      return false;
+    };
     if (def.needOre) {
       const cands: { tx: number; ty: number; d: number }[] = [];
       for (let y = 1; y < MAP_H - 2; y++) {
@@ -270,7 +320,7 @@ export class AIController {
       cands.sort((a, b) => a.d - b.d);
       for (const c of cands) {
         for (const [dx, dy] of [[0, 0], [-1, 0], [0, -1], [-1, -1]] as const) {
-          if (w.canPlace(defId, c.tx + dx, c.ty + dy).ok) return { tx: c.tx + dx, ty: c.ty + dy };
+          if (okSpot(c.tx + dx, c.ty + dy)) return { tx: c.tx + dx, ty: c.ty + dy };
         }
       }
       return null;
@@ -289,7 +339,7 @@ export class AIController {
       for (const c of cands.slice(0, 60)) {
         for (let dy = -3; dy <= 0; dy++) {
           for (let dx = -3; dx <= 0; dx++) {
-            if (w.canPlace(defId, c.tx + dx, c.ty + dy).ok) return { tx: c.tx + dx, ty: c.ty + dy };
+            if (okSpot(c.tx + dx, c.ty + dy)) return { tx: c.tx + dx, ty: c.ty + dy };
           }
         }
       }
@@ -300,7 +350,7 @@ export class AIController {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const tx = hq.tx + 1 + dx, ty = hq.ty + 1 + dy;
-          if (w.canPlace(defId, tx, ty).ok) return { tx, ty };
+          if (okSpot(tx, ty)) return { tx, ty };
         }
       }
     }

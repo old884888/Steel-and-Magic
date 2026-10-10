@@ -26,6 +26,12 @@ export const OWNER_NEUTRAL = 2;   // 蛮族/动物
 
 /** 地形枚举（与 mapgen/renderer 一致） */
 export const T_GRASS = 0, T_WATER = 1, T_TREE = 2, T_ORE = 3, T_RAMP = 4, T_FORD = 5;  // T_FORD滩头：陆地可走/舰船禁行
+export const T_FARM = 6;              // 麦田：可通行耕地（茬地/生长/成熟由farmStage区分）
+
+/** 麦田链（耕种→生长→收割→搬运→入库→回种） */
+export const FARM_GROWTH = 60;        // 生长时长（秒，三段各1/3）
+export const FARM_YIELD = 8;          // 单块基础产量（=农夫一麻袋）
+export const FARM_COST_WOOD = 5;      // 铺设单价（木/格）
 
 /** 伤害类型矩阵：弹种 × 装甲 → 乘数（克制博弈核心表） */
 export const DMG_MATRIX: Record<string, Record<string, number>> = {

@@ -5,6 +5,7 @@ import { updateCombat } from './combat';
 import { updateEconomy } from './economy';
 import { updateConstruction } from './construction';
 import { updateGather } from './gather';
+import { updateFarms } from './farm';
 import { updateNeutrals } from './neutral';
 import { updateFireZones } from './firezone';
 import { updateFog } from './fog';
@@ -26,10 +27,13 @@ export function simTick(w: World, dt: number, ais: (AIController | null)[]): voi
   updateEconomy(w, dt);
   updateConstruction(w, dt);
   updateGather(w, dt);
+  updateFarms(w, dt);
   updateNeutrals(w, dt);
   updateFireZones(w, dt);
   updateCombat(w, dt);
   updateMovement(w, dt);
   if (w.tick % FOG_INTERVAL === 0) updateFog(w);
   if (w.tick % 30 === 0) w.recomputePop();
+  if (w.tick % 300 === 0) w.recomputeAdjacency(); // 地利加成每5秒重算（完工时也会即时算）
+  w.events.update(w, dt);                          // 事件卡调度（AI秒决/玩家弹卡）
 }

@@ -74,7 +74,63 @@ function wireAISettings(): void {
   refresh();
 }
 
+/** 崩溃日志：全局错误捕获，写入localStorage（闪退后重开可查） */
+function setupCrashLogger(): void {
+  const KEY = 'sm_crash_log';
+  const NL = '\n';
+  try {
+    const prev = localStorage.getItem(KEY);
+    if (prev) {
+      console.error('[上次崩溃日志]', prev);
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:200px;overflow:auto;background:#1a0a0a;color:#ff6a5a;font-size:11px;padding:8px;z-index:99999;font-family:monospace;white-space:pre-wrap;';
+      div.textContent = '[Last Crash]' + NL + prev;
+      document.body.appendChild(div);
+      setTimeout(() => div.remove(), 15000);
+    }
+  } catch { /* ignore */ }
+
+  window.addEventListener('error', (e) => {
+    try {
+      const msg = '[' + new Date().toLocaleTimeString() + '] ' + e.message + NL + '  at ' + (e.filename || '?') + ':' + e.lineno + ':' + e.colno + NL + '  ' + String(e.error?.stack || '').slice(0, 500);
+      const existing = localStorage.getItem(KEY) || '';
+      localStorage.setItem(KEY, (existing + NL + msg).slice(-3000));
+    } catch { /* ignore */ }
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    try {
+      const msg = '[' + new Date().toLocaleTimeString() + '] Promise: ' + String(e.reason).slice(0, 300);
+      const existing = localStorage.getItem(KEY) || '';
+      localStorage.setItem(KEY, (existing + NL + msg).slice(-3000));
+    } catch { /* ignore */ }
+  });
+}
+
+/** 作战日志查看器：菜单按钮 + 游戏内顶栏按钮共用，可导出 .log 文件 */
+function wireLogViewer(game: Game): void {
+  const $ = (id: string): HTMLElement => document.getElementById(id)!;
+  const modal = $('logview');
+  const pre = $('logview-pre') as HTMLPreElement;
+  const open = (): void => {
+    const lines = game.world.log.tail(400);
+    pre.textContent = lines.length > 0 ? lines.join('\n') : '（暂无日志）';
+    pre.scrollTop = pre.scrollHeight;
+    modal.style.display = 'flex';
+  };
+  $('btn-log-menu').addEventListener('click', open);
+  $('btn-log-top').addEventListener('click', open);
+  $('btn-log-close').addEventListener('click', () => { modal.style.display = 'none'; });
+  $('btn-log-export').addEventListener('click', () => game.world.log.exportFile());
+  $('btn-log-clear').addEventListener('click', () => {
+    if (!confirm('清空全部历史日志？当前无法撤销')) return;
+    game.world.log.clearPersisted();
+    pre.textContent = '（暂无日志）';
+  });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+}
+
 function boot(): void {
+  setupCrashLogger();
   const params = new URLSearchParams(location.search);
 
   // 无头模拟自测模式：跳过主菜单直接跑
@@ -121,6 +177,7 @@ function boot(): void {
 
   wireAISettings();
   wireMapSetting();
+  wireLogViewer(game);
 }
 
 /** 地图选择持久化（对下一局生效） */

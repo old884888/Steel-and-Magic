@@ -11,17 +11,21 @@ import { Camera } from './camera';
 export interface InputCallbacks {
   onClickSelect(worldPos: Vec, additive: boolean): void;
   onBoxSelect(a: Vec, b: Vec, additive: boolean): void;      // 屏幕坐标角点
-  onContext(worldPos: Vec): void;                             // 右键指令（由game判定移动/攻击/修理/采集）
+  onContext(worldPos: Vec): void;                             // 右键指令（由game判定移动/攻击/修理/采集/集结点）
   onPlacementClick(worldPos: Vec): void;
   onAttackMoveClick(worldPos: Vec): void;                     // 攻击移动模式下的左键落点
   onDoubleClickSelect(worldPos: Vec): void;                   // 双击：选中屏幕内同类
   onHotkey(key: string): void;                                // 'a'|'s'|'h'|'N'|'ctrl+N'
+  onPaintCommit(a: Vec, b: Vec): void;                        // 铺设模式：拖框两角（屏幕坐标）
   onCancel(): void;
 }
 
 export class Input {
   placementMode = false;
   attackMoveMode = false;
+  paintMode = false;                        // 麦田铺设：拖框开垦
+  paintRect: { ax: number; ay: number; bx: number; by: number } | null = null;
+  private paintAnchor: Vec | null = null;
   private pointers = new Map<number, { x: number; y: number }>();
   private downPos: Vec | null = null;       // 左键按下时的屏幕位置
   private dragging = false;
@@ -30,6 +34,11 @@ export class Input {
   private pinchLastDist = 0;
   private keys = new Set<string>();
   private lastClick = { t: 0, x: 0, y: 0 };
+
+  // 边缘滚屏状态：仅鼠标且光标在画布上时生效（触屏/悬停HUD/离开窗口不触发）
+  private static readonly EDGE_ZONE = 24;   // 贴边热区宽度（像素）
+  private cursorOnCanvas = false;
+  private outsideWindow = true;             // 初始未见过光标，别拿(0,0)当贴边
 
   // 框选框当前状态（渲染层读取）
   dragBox: { ax: number; ay: number; bx: number; by: number } | null = null;
@@ -54,7 +63,17 @@ export class Input {
     }, { passive: false });
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => { this.keys.clear(); this.outsideWindow = true; });
+
+    // ---- 边缘滚屏：跟踪光标在画布/HUD/窗外（capture阶段，先于canvas处理） ----
+    window.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      this.outsideWindow = false;
+      this.cursorOnCanvas = e.target === this.canvas;
+    }, { capture: true });
+    document.addEventListener('mouseout', (e) => {
+      if (!e.relatedTarget) this.outsideWindow = true; // 光标离开窗口
+    });
 
     // ---- 浏览器原生手势全灭 ----
     window.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -75,9 +94,23 @@ export class Input {
     return { x: dx, y: dy };
   }
 
+  /** 每帧取屏幕边缘滚屏方向：光标贴边热区即等同按方向键（框选拖拽中同样生效） */
+  edgePanAxis(): Vec {
+    if (!this.cursorOnCanvas || this.outsideWindow) return { x: 0, y: 0 };
+    const z = Input.EDGE_ZONE;
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    let dx = 0, dy = 0;
+    if (this.cur.x <= z) dx = -1; else if (this.cur.x >= w - z) dx = 1;
+    if (this.cur.y <= z) dy = -1; else if (this.cur.y >= h - z) dy = 1;
+    return { x: dx, y: dy };
+  }
+
   cancelModes(): void {
     this.placementMode = false;
     this.attackMoveMode = false;
+    this.paintMode = false;
+    this.paintRect = null;
+    this.paintAnchor = null;
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -87,6 +120,9 @@ export class Input {
     if (e.key === 'Escape') {
       this.placementMode = false;
       this.attackMoveMode = false;
+      this.paintMode = false;
+      this.paintRect = null;
+      this.paintAnchor = null;
       this.cb.onCancel();
       return;
     }
@@ -121,9 +157,12 @@ export class Input {
       return;
     }
     if (e.button === 2) { // 右键
-      if (this.placementMode || this.attackMoveMode) {
+      if (this.placementMode || this.attackMoveMode || this.paintMode) {
         this.placementMode = false;
         this.attackMoveMode = false;
+        this.paintMode = false;
+        this.paintRect = null;
+        this.paintAnchor = null;
         this.cb.onCancel();
         return;
       }
@@ -131,6 +170,11 @@ export class Input {
       return;
     }
     if (e.button === 0) {
+      if (this.paintMode) { // 铺设模式：左键落下铺设起点
+        this.paintAnchor = p;
+        this.paintRect = null;
+        return;
+      }
       this.downPos = p;
       this.dragging = false;
     }
@@ -157,6 +201,10 @@ export class Input {
     if (this.panning && this.panLast) {
       this.cam.pan(-(p.x - this.panLast.x) / this.cam.zoom, -(p.y - this.panLast.y) / this.cam.zoom);
       this.panLast = p;
+      return;
+    }
+    if (this.paintMode && this.paintAnchor) { // 铺设拖框
+      this.paintRect = { ax: this.paintAnchor.x, ay: this.paintAnchor.y, bx: p.x, by: p.y };
       return;
     }
     if (this.downPos) {
@@ -196,6 +244,17 @@ export class Input {
         }
       }
       this.downPos = null; this.dragging = false; this.dragBox = null;
+      return;
+    }
+    // 铺设模式松手：提交拖框
+    if (e.button === 0 && this.paintMode && this.paintAnchor) {
+      const rect = this.paintRect ?? { ax: this.paintAnchor.x, ay: this.paintAnchor.y, bx: p.x, by: p.y };
+      this.paintAnchor = null;
+      this.paintRect = null;
+      this.paintMode = false;
+      if (Math.abs(rect.bx - rect.ax) > 4 || Math.abs(rect.by - rect.ay) > 4) {
+        this.cb.onPaintCommit({ x: rect.ax, y: rect.ay }, { x: rect.bx, y: rect.by });
+      }
     }
     if (this.pointers.size < 2) this.pinchLastDist = 0;
   }

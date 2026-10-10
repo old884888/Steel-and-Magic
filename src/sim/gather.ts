@@ -54,9 +54,9 @@ export function updateGather(w: World, dt: number): void {
           }
           break;
         }
-        // 开采（不超过载货上限与资源余量）
+        // 开采（不超过载货上限与资源余量）；法令/科技加成作用于采集速率
         faceToward(e, tileCenter(e.resTile)!, dt);
-        const take = Math.min(g.rate * dt, g.capacity - (e.cargo?.amt ?? 0));
+        const take = Math.min(g.rate * w.mult(e.owner, 'gather') * dt, g.capacity - (e.cargo?.amt ?? 0));
         let deposited = 0;
         if (e.order.res === 'wood') {
           const avail = w.treeWood[e.resTile];
@@ -97,7 +97,7 @@ export function updateGather(w: World, dt: number): void {
         const depot = nearestDepot(w, e);
         if (!depot) { e.gatherState = null; e.order = { kind: 'idle' }; continue; }
         if (dist(e.x, e.y, depot.x, depot.y) > depot.radius() + TILE * 2.2) { e.gatherState = 'toDepot'; break; }
-        if (e.cargo && e.cargo.amt > 0) {
+        if (e.cargo && e.cargo.amt > 0 && e.cargo.res !== 'wheat') {
           const added = w.addRes(e.owner, e.cargo.res, e.cargo.amt);
           e.cargo.amt -= added;
           if (added > 0) {

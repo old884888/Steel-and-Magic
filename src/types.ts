@@ -50,6 +50,8 @@ export interface UnitDef {
   armor?: 'light' | 'heavy';         // 装甲类型（伤害矩阵乘数，默认light）
   wild?: 'passive' | 'territorial';  // 野生动物习性（passive不索敌，territorial守家）
   bounty?: ResAmount;                // 击杀缴获（猎食/剿灭奖励）
+  mg?: WeaponDef;                    // 舷侧机枪：固定双联，独立索敌/冷却，与主炮互不干扰
+  pop?: number;                      // 人口占用（默认1；农夫0.5）
   gather?: {                   // 采集能力（伐木/采矿）
     rate: number;              // 每秒采集量
     capacity: number;          // 载货上限
@@ -72,6 +74,7 @@ export interface BuildingDef {
   bufferCap?: number;          // 自动机内部缓冲仓容量（满仓且库存到上限时停机）
   produces?: string[];         // 可生产单位
   weapon?: WeaponDef;
+  mg?: WeaponDef;              // 舷侧机枪（HQ防卫等）：独立索敌/冷却，可与主武器同时开火
   popBonus?: number;
   capBonus?: number;           // 仓库：提升资源存储上限
   isDepot?: boolean;           // 可作为工人卸货点

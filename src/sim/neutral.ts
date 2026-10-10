@@ -89,6 +89,8 @@ export function updateNeutrals(w: World, dt: number): void {
       }
 
       if (e.nRaidT <= 0) {
+        // 停战期（事件卡「蛮族使者」）：掠袭暂停，稍后再问
+        if (w.time < w.barbTruceUntil) { e.nRaidT = 10; continue; }
         e.nRaidT = 30;
         const ready = raiders.filter(r => r.order.kind === 'idle' && !isFleeing(r));
         if (ready.length >= 2) {

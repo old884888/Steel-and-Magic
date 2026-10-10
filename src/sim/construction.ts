@@ -19,12 +19,24 @@ export function updateConstruction(w: World, dt: number): void {
     const def = BUILDING_DEFS[b.defId];
 
     const inRange = dist(e.x, e.y, b.x, b.y) <= b.radius() + TILE * 2;
-    if (!inRange) continue; // 还在路上，movement负责走
+    if (!inRange) {
+      // 还在路上，movement负责走。但若持续无路径（工地被围死/不可达），8秒后弃单并拆除烂尾工地
+      if (e.path) { e.buildWait = 0; continue; }
+      e.buildWait = (e.buildWait ?? 0) + dt;
+      if (e.buildWait > 8) {
+        e.order = { kind: 'idle' };
+        e.buildWait = 0;
+        b.progress = 0;
+        w.removeEntity(b.id);
+        w.addLog('system', `${def.name}工地无法抵达，已放弃并拆除`, e.owner, 'abandon:' + b.id, 60);
+      }
+      continue;
+    }
 
     if (!b.done) {
-      // 施工
+      // 施工（法令/科技：工程提速/流水作业）
       faceToward2(e, b.x, b.y, dt);
-      b.progress += dt / def.buildTime;
+      b.progress += dt * w.mult(b.owner, 'build') / def.buildTime;
       if ((w.tick & 15) === 0) w.addFx(b.x + (Math.random() - 0.5) * b.radius(), b.y + (Math.random() - 0.5) * b.radius(), 'hit', 5, 0.2);
       if (b.progress >= 1) {
         b.progress = 1;
@@ -37,7 +49,7 @@ export function updateConstruction(w: World, dt: number): void {
     } else if (b.hp < def.hp) {
       // 修理
       faceToward2(e, b.x, b.y, dt);
-      b.hp = Math.min(def.hp, b.hp + 30 * dt);
+      b.hp = Math.min(def.hp, b.hp + 30 * w.mult(e.owner, 'build') * dt);
       if ((w.tick & 31) === 0) w.addFx(b.x + (Math.random() - 0.5) * b.radius(), b.y - b.radius() * 0.6, 'hit', 4, 0.2);
       if (b.hp >= def.hp) e.order = { kind: 'idle' };
     } else {
@@ -52,6 +64,8 @@ export function updateConstruction(w: World, dt: number): void {
       if (b && finished.includes(b)) e.order = { kind: 'idle' };
     }
   }
+  // 有新建筑落成 → 重算地利加成
+  if (finished.length > 0) w.recomputeAdjacency();
 
   // ---- 生产队列 ----
   for (const e of w.entities.values()) {
@@ -69,6 +83,14 @@ export function updateConstruction(w: World, dt: number): void {
       const rally = e.rally ?? { x: e.x, y: e.y + e.radius() + TILE * 1.5 };
       w.issueMove([u.id], rally);
     }
+  }
+
+  // ---- 科技研究（全局单线，需已建成研究所；研究所损毁则进度冻结） ----
+  for (const owner of [0, 1] as const) {
+    const p = w.players[owner];
+    if (!p.research || !w.hasLab(owner)) continue;
+    p.research.remaining -= dt;
+    if (p.research.remaining <= 0) w.completeResearch(owner);
   }
 }
 

@@ -1,5 +1,6 @@
 import { BUILDING_DEFS } from '../data/buildings';
 import { TILE, MAP_W, MAP_H, T_GRASS, T_TREE, STORAGE_BASE, STORAGE_PER_STOREHOUSE } from '../config';
+import { LOGISTICS_STORAGE, DEEP_STORAGE_BONUS } from '../data/policies';
 import type { World } from './world';
 import type { Entity } from './entity';
 import type { Res } from '../types';
@@ -31,23 +32,28 @@ export function updateEconomy(w: World, dt: number): void {
 
     if (!def.income) continue;
 
+    // 采集乘数：法令/科技 × 地利加成 × 富矿脉事件
+    const gm = w.mult(e.owner, 'gather')
+      * (e.defId === 'lumber' || e.defId === 'mine' || e.defId === 'farm' ? (e.adjBonus ?? 1) : 1)
+      * ((e.boostUntil ?? 0) > w.time ? 2 : 1);
+
     let active = true;
-    if (e.defId === 'lumber') active = runExtractor(w, e, 'wood', def.income.wood ?? 0, def.bufferCap ?? 30, dt);
-    else if (e.defId === 'mine') active = runExtractor(w, e, 'ore', def.income.ore ?? 0, def.bufferCap ?? 40, dt);
+    if (e.defId === 'lumber') active = runExtractor(w, e, 'wood', (def.income.wood ?? 0) * gm, def.bufferCap ?? 30, dt);
+    else if (e.defId === 'mine') active = runExtractor(w, e, 'ore', (def.income.ore ?? 0) * gm, def.bufferCap ?? 40, dt);
     else if (e.owner <= 1) {
       // 农场/HQ 直接入库
       for (const [res, rate] of Object.entries(def.income) as [Res, number][]) {
-        const added = w.addRes(e.owner, res, rate * dt);
+        const added = w.addRes(e.owner, res, rate * gm * dt);
         if (added <= 0) active = false;
-        income[e.owner][res] += rate;
+        income[e.owner][res] += rate * gm;
       }
     }
 
     if (active) {
       const inc = income[e.owner];
-      inc.wood += def.income.wood ?? 0;
-      inc.food += def.income.food ?? 0;
-      inc.ore += def.income.ore ?? 0;
+      inc.wood += (def.income.wood ?? 0) * gm;
+      inc.food += (def.income.food ?? 0) * gm;
+      inc.ore += (def.income.ore ?? 0) * gm;
     }
   }
 
@@ -58,7 +64,10 @@ export function updateEconomy(w: World, dt: number): void {
     p.res.wood += p.income.wood * dt;
     p.res.food += p.income.food * dt;
     p.res.ore += p.income.ore * dt;
-    p.storageCap = STORAGE_BASE + STORAGE_PER_STOREHOUSE * storehouses[owner];
+    p.storageCap = STORAGE_BASE + STORAGE_PER_STOREHOUSE * storehouses[owner]
+      + (p.edict === 'logistics' ? LOGISTICS_STORAGE : 0)
+      + (p.techs.includes('deepStorage') ? DEEP_STORAGE_BONUS : 0);
+    p.edictCd = Math.max(0, p.edictCd - dt);
   }
 }
 
