@@ -242,9 +242,11 @@ function wireMapSelect(game: Game): void {
     const seed = sel === 'random'
       ? (Number.isFinite(raw) && raw > 0 ? raw : Math.floor(Math.random() * 999999999) + 1)
       : 20261009; // 内置地图固定种子（经典布局不变）
+    const playerFaction = ($('facPlayer') as HTMLSelectElement).value as 'steel' | 'kingdom';
+    const aiFaction = ($('facAi') as HTMLSelectElement).value as 'steel' | 'kingdom';
     modal.style.display = 'none';
     $('menu').style.display = 'none';
-    game.startGame({ variant: sel, seed });
+    game.startGame({ variant: sel, seed, playerFaction, aiFaction });
   });
   paint();
 }

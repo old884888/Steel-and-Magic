@@ -106,9 +106,18 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityPack> = {
   },
 };
 
+/** 王国权重表（联邦键 → 王国defId；AI思考时归一后查此表） */
+export const KINGDOM_RANK_WEIGHTS: Record<PersonalityId, Record<string, number>> = {
+  balanced: { orchard: 1.2, lumberShed: 1.0, silverMine: 1.0, granary: 0.8, warHall: 1.0, militia: 1.0, spearman: 0.8 },
+  rusher:   { militia: 2.0, warHall: 1.6, orchard: 1.0, spearman: 0.7 },
+  turtler:  { orchard: 1.3, silverMine: 1.2, granary: 1.0, spearman: 1.4 },
+  eco:      { lumberShed: 1.6, silverMine: 1.6, orchard: 1.4, granary: 1.2, sageTower: 1.3 },
+};
+
 /** 建筑目标数量基准（×性格targetMul = 实际上限） */
 export const BASE_BUILD_TARGETS: Record<string, number> = {
   builder: 2, farm: 7, lumber: 2, mine: 3, storehouse: 4, barracks: 2, factory: 2, turret: 2, lab: 1, tradePost: 2, monument: 1, hq: 1,
+  serf: 2, militia: 10, spearman: 6, lifeTree: 1, orchard: 7, lumberShed: 2, silverMine: 3, granary: 4, sageTower: 1, warHall: 2,
 };
 
 /** 性格科研队列：按顺序研究第一项未完成的 */

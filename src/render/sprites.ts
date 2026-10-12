@@ -7,6 +7,14 @@ import { TILE, PALETTES, METAL, METAL_DARK, COLORS, T_GRASS, T_WATER, T_TREE, T_
 
 const cache = new Map<string, HTMLCanvasElement>();
 
+/** 晨曦王国调色板：owner0=翡翠绿（玩家），owner1=暗紫（敌国） */
+const KINGDOM_PALETTES = [
+  { primary: '#3f8f6a', secondary: '#2c6b4a', dark: '#1d4a34' },
+  { primary: '#7a5fa8', secondary: '#5a4278', dark: '#3d2b52' },
+];
+const isKingdomDef = (defId: string): boolean =>
+  ['serf', 'militia', 'spearman', 'palaceCart', 'lifeTree', 'orchard', 'lumberShed', 'silverMine', 'granary', 'sageTower', 'warHall'].indexOf(defId) >= 0;
+
 function mk(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -82,7 +90,7 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
   let hull = cache.get(key + ':h') ?? null;
   let turret = cache.get(key + ':t') ?? null;
   if (!hull) {
-    const p = PALETTES[owner] ?? PALETTES[0];
+    const p = isKingdomDef(defId) ? (KINGDOM_PALETTES[owner] ?? KINGDOM_PALETTES[0]) : (PALETTES[owner] ?? PALETTES[0]);
     switch (defId) {
       case 'builder': {
         // 车体：小型工程车，四轮+驾驶舱+警示条
@@ -409,6 +417,78 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':t', turret);
         break;
       }
+      case 'palaceCart': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(56, 40);
+        for (const [wx, wy] of [[10, 8], [24, 7], [38, 8], [10, 32], [24, 33], [38, 32]]) {
+          circle(ctx, wx, wy, 6, '#3d2b1a');
+          circle(ctx, wx, wy, 2.6, '#7a5f3d');
+        }
+        rr(ctx, 4, 10, 48, 20, 6, '#000');
+        rrG(ctx, 5, 11, 46, 18, 5, '#8a6238', '#5d4223');
+        rr(ctx, 34, 12, 14, 16, 4, '#e8e0d0');
+        circle(ctx, 41, 12, 3, '#ffd76e');
+        ctx.fillStyle = '#3f8f6a';
+        ctx.fillRect(6, 24, 40, 3);
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(20, 10);
+        tc.strokeStyle = '#20242a'; tc.lineWidth = 2;
+        tc.beginPath(); tc.moveTo(6, 8); tc.lineTo(6, 2); tc.stroke();
+        tc.fillStyle = '#3f8f6a'; tc.fillRect(6, 2, 8, 3.5);
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'serf': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(18, 18);
+        circle(ctx, 9, 10, 6, '#8a9a6a');
+        ctx.fillStyle = '#e8c9a0';
+        circle(ctx, 9, 6.5, 2, '#e8c9a0');
+        ctx.fillStyle = '#c9b06a';
+        ctx.beginPath(); ctx.ellipse(9, 4.6, 6.8, 2.3, 0, 0, Math.PI * 2); ctx.fill();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(16, 8);
+        tc.fillStyle = '#6b4f2a'; tc.fillRect(3, 3.2, 10, 2);
+        tc.fillStyle = '#8a919c'; tc.fillRect(12, 1.8, 3, 4);
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'militia': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(18, 18);
+        circle(ctx, 9, 10, 6, '#5d8a4a');
+        ctx.fillStyle = '#e8c9a0';
+        circle(ctx, 9, 6.5, 2, '#e8c9a0');
+        ctx.fillStyle = '#4a3823';
+        circle(ctx, 9, 5, 2.6, '#4a3823');
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(20, 8);
+        tc.fillStyle = '#2c2f34'; tc.fillRect(3, 3.2, 14, 2.2);
+        tc.fillStyle = '#8a919c'; tc.fillRect(15, 2, 3, 3.4);
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'spearman': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(20, 18);
+        circle(ctx, 10, 10, 6.5, '#3f8f6a');
+        ctx.fillStyle = '#e8c9a0';
+        circle(ctx, 10, 6, 2.2, '#e8c9a0');
+        ctx.fillStyle = '#2c6b4a';
+        ctx.beginPath(); ctx.moveTo(10, 1); ctx.lineTo(15, 8); ctx.lineTo(5, 8); ctx.closePath(); ctx.fill();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(24, 10);
+        tc.strokeStyle = '#6b4f2a'; tc.lineWidth = 2;
+        tc.beginPath(); tc.moveTo(3, 5); tc.lineTo(20, 5); tc.stroke();
+        tc.fillStyle = '#dceaf2';
+        tc.beginPath(); tc.moveTo(20, 2.5); tc.lineTo(24, 5); tc.lineTo(20, 7.5); ctx.closePath(); tc.fill();
+        cache.set(key + ':t', turret);
+        break;
+      }
       case 'deer': {
         let ctx: CanvasRenderingContext2D;
         [hull, ctx] = mk(20, 18);
@@ -482,7 +562,7 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
   let base = cache.get(key + ':b') ?? null;
   let top = cache.get(key + ':t') ?? null;
   if (!base) {
-    const p = PALETTES[owner] ?? PALETTES[0];
+    const p = isKingdomDef(defId) ? (KINGDOM_PALETTES[owner] ?? KINGDOM_PALETTES[0]) : (PALETTES[owner] ?? PALETTES[0]);
     const def = BUILDING_SIZE[defId] ?? 1;
     const S = def * TILE;
     let ctx: CanvasRenderingContext2D;
@@ -692,6 +772,79 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         tc.fillRect(50, 8, 5, 7);
         break;
       }
+      case 'lifeTree': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#3d4a34');
+        circle(ctx, S / 2, S / 2 - 6, 26, '#2e5e2a');
+        circle(ctx, S / 2 - 10, S / 2 - 14, 16, '#3a7534');
+        circle(ctx, S / 2 + 10, S / 2 - 12, 14, '#4a8a3f');
+        ctx.fillStyle = '#5d4223';
+        ctx.fillRect(S / 2 - 8, S / 2 + 8, 16, 16);
+        ctx.fillStyle = '#3d2b1a';
+        ctx.beginPath(); ctx.arc(S / 2, S / 2 + 14, 6, 0, Math.PI, true); ctx.fill();
+        ctx.fillStyle = '#ffd76e';
+        for (let k = 0; k < 5; k++) circle(ctx, 12 + k * ((S - 24) / 4), 10 + (k % 2) * 4, 2, '#ffd76e');
+        break;
+      }
+      case 'orchard': {
+        rr(ctx, 1, 1, S - 2, S - 2, 6, '#6d5a35');
+        rr(ctx, 4, 4, S - 8, S - 8, 4, '#7a8a4a');
+        for (const [ax, ay] of [[S / 4, S / 4], [(S * 3) / 4, S / 4], [S / 4, (S * 3) / 4], [(S * 3) / 4, (S * 3) / 4]]) {
+          circle(ctx, ax, ay, 8, '#c9564a');
+          circle(ctx, ax - 2, ay - 2, 3, '#e8a06a');
+        }
+        break;
+      }
+      case 'lumberShed': {
+        rr(ctx, 1, 1, S - 2, S - 2, 6, '#5d4a2f');
+        rr(ctx, 6, 6, S - 12, S - 14, 4, '#7a5f3d');
+        ctx.strokeStyle = '#4a3823'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(6, 6); ctx.lineTo(S - 6, S / 2 - 1); ctx.stroke();
+        for (let i = 0; i < 3; i++) circle(ctx, S - 9, S - 14 + i * 7, 4, '#9c7a4d');
+        break;
+      }
+      case 'silverMine': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#4c4f56');
+        ctx.fillStyle = '#8ad8e8';
+        for (const [cx2, cy2] of [[S / 2 - 8, S / 2], [S / 2 + 6, S / 2 + 4], [S / 2, S - 10]]) {
+          ctx.save(); ctx.translate(cx2, cy2); ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+        }
+        ctx.strokeStyle = '#d8f0f8'; ctx.lineWidth = 1;
+        ctx.strokeRect(6, 6, S - 12, S - 12);
+        break;
+      }
+      case 'granary': {
+        rr(ctx, 1, 1, S - 2, S - 2, 6, '#8a6238');
+        circle(ctx, S / 2, S / 2 + 2, S / 2 - 8, '#c9a53c');
+        ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 2;
+        for (let k = -2; k <= 2; k++) {
+          ctx.beginPath(); ctx.moveTo(8, S / 2 + k * 7); ctx.lineTo(S - 8, S / 2 + k * 7); ctx.stroke();
+        }
+        circle(ctx, S / 2, 10, 5, '#8a6238');
+        break;
+      }
+      case 'sageTower': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#3d444e');
+        rr(ctx, S / 2 - 10, S / 2 - 6, 20, S / 2, 5, '#5a5f8a');
+        circle(ctx, S / 2, 16, 10, '#7a5fa8');
+        circle(ctx, S / 2, 16, 5, '#c9b0e8');
+        ctx.fillStyle = '#ffd76e';
+        circle(ctx, S / 2, 8, 3, '#ffd76e');
+        ctx.fillRect(S / 2 - 1.5, 8, 3, 8);
+        break;
+      }
+      case 'warHall': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#3d2b1a');
+        rr(ctx, 5, 5, S - 10, S - 10, 5, '#5d4223');
+        rr(ctx, 12, 12, S - 24, S - 30, 4, '#7a5f3d');
+        ctx.beginPath();
+        ctx.moveTo(10, 24); ctx.lineTo(S / 2, 8); ctx.lineTo(S - 10, 24);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#3f8f6a';
+        ctx.fillRect(10, 24, S - 20, 4);
+        rr(ctx, S / 2 - 8, S - 22, 16, 14, 2, '#20242a');
+        break;
+      }
       case 'wall': {
         rr(ctx, 3, 3, S - 6, S - 6, 3, '#6b6f78');
         rr(ctx, 7, 7, S - 14, S - 14, 2, '#8a8f96');
@@ -812,7 +965,7 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
   return { base, top };
 }
 
-const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, tradePost: 2, monument: 3, barracks: 3, factory: 3, turret: 1 };
+const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, tradePost: 2, monument: 3, barracks: 3, factory: 3, turret: 1, lifeTree: 3, orchard: 2, lumberShed: 2, silverMine: 2, granary: 2, sageTower: 2, warHall: 3 };
 
 // ================= 地块 =================
 

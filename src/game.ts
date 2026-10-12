@@ -1,4 +1,5 @@
 import { TILE, MAP_W, MAP_H, OWNER_PLAYER, OWNER_ENEMY, SIM_DT, T_TREE, T_ORE, FARM_COST_WOOD } from './config';
+import type { Faction } from './types';
 import { UNIT_DEFS } from './data/units';
 import { BUILDING_DEFS } from './data/buildings';
 import type { Entity } from './sim/entity';
@@ -71,9 +72,8 @@ export class Game {
       (wx, wy) => this.cam.jumpTo(wx, wy),
     );
 
-    // 开局镜头对准基地车（或已展开的基地）
-    const start = this.world.findHq(OWNER_PLAYER) ??
-      [...this.world.entities.values()].find(e => e.kind === 'unit' && e.defId === 'mcv' && e.owner === OWNER_PLAYER);
+    // 开局镜头对准主堡/基地车（findMain 兼容双阵营）
+    const start = this.world.findMain(OWNER_PLAYER);
     if (start) this.cam.jumpTo(start.x, start.y);
 
     this.loop = new GameLoop(
@@ -406,8 +406,9 @@ export class Game {
   renderOnce(): void { this.renderFrame(); }
 
   /** 选图后重开世界：新世界+新渲染器+新AI，状态全部归零 */
-  rebuildWorld(variant: MapVariant, seed: number): void {
-    this.world = new World(seed, variant, true);
+  rebuildWorld(variant: MapVariant, seed: number, factions: readonly [Faction, Faction] = ['steel', 'steel']): void {
+    void factions;
+    this.world = new World(seed, variant, true, factions);
     this.renderer = new Renderer(this.canvas, this.world);
     this.minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, this.world, this.cam, (wx, wy) => this.cam.jumpTo(wx, wy));
     this.aiEnemy = new AIController(OWNER_ENEMY, resolveEnemyAIConfig());
@@ -421,26 +422,25 @@ export class Game {
     this.renderer.attackMarks.clear();
     this.input.cancelModes();
     updateFog(this.world);
-    const start = this.world.findHq(OWNER_PLAYER) ??
-      [...this.world.entities.values()].find(e => e.kind === 'unit' && e.defId === 'mcv' && e.owner === OWNER_PLAYER);
+    const start = this.world.findMain(OWNER_PLAYER);
     if (start) this.cam.jumpTo(start.x, start.y);
   }
 
-  /** 选图确认：重建世界并开局 */
-  startGame(choice: { variant: MapVariant; seed: number }): void {
-    this.rebuildWorld(choice.variant, choice.seed);
+  /** 选图+选阵营确认：重建世界并开局 */
+  startGame(choice: { variant: MapVariant; seed: number; playerFaction: Faction; aiFaction: Faction }): void {
+    this.rebuildWorld(choice.variant, choice.seed, [choice.playerFaction, choice.aiFaction]);
     this.start();
   }
 
-  /** 基地车展开成指挥基地（UI入口） */
+  /** 基地车展开成主堡（UI入口，双阵营通用） */
   deployMCV(): void {
-    const mcv = [...this.selection].map(id => this.world.entities.get(id)).find(e => e?.defId === 'mcv');
+    const mcv = [...this.selection].map(id => this.world.entities.get(id)).find(e => e?.defId === 'mcv' || e?.defId === 'palaceCart');
     if (!mcv) return;
-    const hq = this.world.deployMCV(mcv.id);
-    if (!hq) { this.hud.toast('此处无法展开（地面不平/有障碍/被占用）'); return; }
+    const main = this.world.deployMCV(mcv.id);
+    if (!main) { this.hud.toast('此处无法展开（地面不平/有障碍/被占用）'); return; }
     this.selection.clear();
-    this.selection.add(hq.id);
-    this.hud.toast('指挥基地展开完成');
+    this.selection.add(main.id);
+    this.hud.toast('展开完成');
   }
 
   /** 金币加速建造：1金=2秒，每工地限一次 */

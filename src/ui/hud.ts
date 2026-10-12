@@ -125,10 +125,11 @@ export class HUD {
     const p0 = w.players[0];
     const selSig = sel.map(e => {
       let s = `${e.id}:${e.defId}:${e.done ? Math.ceil(e.hp) : Math.floor(e.progress * 10)}:${e.queue.length}`;
-      if (e.done && (e.adjLabel || e.defId === 'hq' || e.defId === 'lab')) {
+      const isMainDef = BUILDING_DEFS[e.defId]?.isMain === true;
+      if (e.done && (e.adjLabel || isMainDef)) {
         s += `:${e.adjLabel ?? ''}`;
-        if (e.defId === 'hq') s += `:${p0.edict ?? ''}:${Math.ceil(p0.edictCd / 5)}`;
-        if (e.defId === 'lab') s += `:${p0.research?.id ?? ''}:${p0.research ? Math.floor((1 - p0.research.remaining / ((ERAS as Record<string, { time: number }>)[p0.research.id]?.time ?? TECHS[p0.research.id as TechId].time)) * 10) : ''}:${p0.techs.join(',')}:${p0.researchBoosted ? 1 : 0}`;
+        if (isMainDef) s += `:${p0.edict ?? ''}:${Math.ceil(p0.edictCd / 5)}`;
+        if (e.defId === 'lab' || e.defId === 'sageTower') s += `:${p0.research?.id ?? ''}:${p0.research ? Math.floor((1 - p0.research.remaining / ((ERAS as Record<string, { time: number }>)[p0.research.id]?.time ?? TECHS[p0.research.id as TechId].time)) * 10) : ''}:${p0.techs.join(',')}:${p0.researchBoosted ? 1 : 0}`;
       }
       return s;
     }).join('|') + '#' + (g.placement?.defId ?? '') + '#' + (g.input.paintMode ? 'P' : '');
@@ -217,8 +218,8 @@ export class HUD {
       }
       // 地利加成展示
       if (b.done && b.adjLabel) html += `<div class="queue" style="color:#9fd18f">地利：${b.adjLabel}</div>`;
-      // HQ：法令四选一
-      if (b.done && b.defId === 'hq') {
+      // 主堡：法令四选一（双阵营主堡通用）
+      if (b.done && BUILDING_DEFS[b.defId].isMain) {
         const p = w.players[0];
         html += `<div class="hint" style="font-size:12px;margin-top:4px">国家法令（切换冷却45秒）：</div><div class="btnrow">`;
         for (const [id, ed] of Object.entries(EDICTS) as [EdictId, typeof EDICTS[EdictId]][]) {
@@ -302,7 +303,7 @@ export class HUD {
       }
       // 研究进度（进度挂在玩家身上，不在建筑队列里）
       let resPct = -1;
-      if (b.done && b.defId === 'lab' && p0.research) {
+      if (b.done && (b.defId === 'lab' || b.defId === 'sageTower') && p0.research) {
         const rdef = (ERAS as Record<string, { name: string; time: number }>)[p0.research.id] ?? TECHS[p0.research.id as TechId];
         resPct = Math.floor((1 - p0.research.remaining / rdef.time) * 100);
         html += `<div class="queue">研究中：${rdef.name}<div class="queuebar"><i data-rbar style="width:${resPct}%"></i></div></div>`;

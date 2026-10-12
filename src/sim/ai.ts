@@ -4,11 +4,19 @@ import { MAP_W, MAP_H, TILE, T_ORE, T_TREE } from '../config';
 import { dist } from '../engine/spatialHash';
 import type { World } from './world';
 import type { Entity } from './entity';
-import { standardAIConfig, BASE_BUILD_TARGETS, RESEARCH_QUEUES, type AIConfig } from './ai-config';
+import { standardAIConfig, BASE_BUILD_TARGETS, RESEARCH_QUEUES, KINGDOM_RANK_WEIGHTS, type AIConfig } from './ai-config';
 import type { EdictId } from '../data/policies';
 import { rankProduction } from './ai-priority';
 import { takeSnapshot, applyRetreat, applySpareArtillery, findHighGroundNear, counterCompWeights, isRetreating, type AISnapshot, type TacticCtx } from './ai-tactics';
 import { tryEnqueue } from './construction';
+
+/** 王国→联邦 defId 别名：AI决策表（caps/打分switch/队列）按联邦键索引，王国单位经此归一 */
+export const KINGDOM_ALIAS: Record<string, string> = {
+  lifeTree: 'hq', palaceCart: 'mcv', serf: 'builder',
+  orchard: 'farm', lumberShed: 'lumber', silverMine: 'mine',
+  granary: 'storehouse', sageTower: 'lab', warHall: 'barracks',
+};
+const normId = (defId: string): string => KINGDOM_ALIAS[defId] ?? defId;
 
 /** 单位存量上限（性格权重决定"想不想要"，这里是"最多要多少"） */
 const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, farmer: 0, mcv: 0 }; // 农夫/额外基地车：玩家侧专属，AI暂不采用
@@ -28,6 +36,8 @@ export class AIController {
   private waveUntil = 0;
   private attackCd: number;
   private lastBuy = 0;              // 上次断粮买食时间（30秒一次）
+  private kingdom = false;          // 王国阵营：权重表/科研队列走王国键
+  private kWeights: Record<string, number> | null = null;
 
   constructor(owner: 0 | 1, cfg: AIConfig = standardAIConfig()) {
     this.owner = owner;
@@ -48,9 +58,13 @@ export class AIController {
   private think(w: World): void {
     const foe = (1 - this.owner) as 0 | 1;
     const snap = takeSnapshot(w, this.owner, foe);
+    if (!this.kingdom) this.kingdom = w.players[this.owner].faction === 'kingdom';
+    if (this.kingdom && !this.kWeights) {
+      this.kWeights = KINGDOM_RANK_WEIGHTS[this.cfg.personalityId] ?? {};
+    }
 
     // ---- 基地车未展开=最高优先级：就近展开，绝不游走（展开前不搞任何建设） ----
-    const myHq = snap.myBuildings.find(b => b.defId === 'hq');
+    const myHq = snap.myBuildings.find(b => BUILDING_DEFS[b.defId].isMain && b.done);
     if (!myHq) {
       this.handleNoHq(w, snap);
       return;
@@ -240,36 +254,43 @@ export class AIController {
     }
   }
 
-  /** 无HQ=基地车还没展开：螺旋找合法落点，原地可开就展开；需挪窝只下一次移动指令（防游走） */
+  /** 无主堡=基地车还没展开：螺旋找合法落点，原地可开就展开；需挪窝只下一次移动指令（防游走） */
   private handleNoHq(w: World, snap: AISnapshot): void {
-    const mcv = snap.myUnits.find(u => u.defId === 'mcv');
-    if (!mcv) return; // 车和基地都没了：等战败判定
+    const vehicle = snap.myUnits.find(u => u.defId === 'mcv' || u.defId === 'palaceCart');
+    if (!vehicle) return; // 车和主堡都没了：等战败判定
+    const into = UNIT_DEFS[vehicle.defId]?.deploysInto ?? 'hq';
     for (let r = 0; r <= 4; r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-          const tx = Math.round(mcv.x / TILE) - 1 + dx;
-          const ty = Math.round(mcv.y / TILE) - 1 + dy;
-          if (!w.canPlace('hq', tx, ty, mcv.id).ok) continue;
+          const tx = Math.round(vehicle.x / TILE) - 1 + dx;
+          const ty = Math.round(vehicle.y / TILE) - 1 + dy;
+          if (!w.canPlace(into, tx, ty, vehicle.id).ok) continue;
           // 落点在脚下（格线取整±1格误差内）：直接展开，杜绝原地空转
-          const cDist = Math.hypot(mcv.x - (tx + 1.5) * TILE, mcv.y - (ty + 1.5) * TILE);
-          if (cDist <= TILE * 1.2) { w.deployMCV(mcv.id); return; }
+          const cDist = Math.hypot(vehicle.x - (tx + 1.5) * TILE, vehicle.y - (ty + 1.5) * TILE);
+          if (cDist <= TILE * 1.2) { w.deployMCV(vehicle.id); return; }
           // 需要挪窝：目标点已在路上就绝不下新指令（防反复寻路游走）
           const target = { x: (tx + 1.5) * TILE, y: (ty + 1.5) * TILE };
-          const movingThere = mcv.order.kind === 'move' && mcv.order.target &&
-            Math.hypot(mcv.order.target.x - target.x, mcv.order.target.y - target.y) < 8;
-          if (!movingThere) w.issueMove([mcv.id], target);
+          const movingThere = vehicle.order.kind === 'move' && vehicle.order.target &&
+            Math.hypot(vehicle.order.target.x - target.x, vehicle.order.target.y - target.y) < 8;
+          if (!movingThere) w.issueMove([vehicle.id], target);
           return;
         }
       }
     }
     // 半径4格全无合法落点（极端地形）：原地兜底展开（deployMCV内部r<=2再找）
-    w.deployMCV(mcv.id);
+    w.deployMCV(vehicle.id);
+  }
+
+  /** 阵营权重表：王国AI用王国键权重（兽潮/守林/德鲁伊），联邦AI用自身表 */
+  private rankWeights(): Record<string, number> {
+    if (this.kingdom && this.kWeights) return this.kWeights;
+    return this.cfg.weights;
   }
 
   /** 单位生产缺口系数（排行用）：存量越少分越高；到顶直接归零（从候选池剔除，防刷屏） */
   private unitNeed(snap: AISnapshot, defId: string): number {
-    const cap = UNIT_CAPS[defId] ?? 2;
+    const cap = UNIT_CAPS[normId(defId)] ?? 2;
     let count = snap.myUnits.reduce((n, u) => n + (u.defId === defId ? 1 : 0), 0);
     count += snap.myBuildings.reduce((n, bb) => n + bb.queue.reduce((m, q) => m + (q.unitId === defId ? 1 : 0), 0), 0);
     if (count >= cap) return 0;
@@ -278,7 +299,8 @@ export class AIController {
 
   /** 建筑建造缺口系数：到顶归零（防无限套娃）；经济建筑按真实缺口打分 */
   private buildNeed(snap: AISnapshot, defId: string): number {
-    const target = Math.ceil((BASE_BUILD_TARGETS[defId] ?? 2) * (this.cfg.targetMul[defId] ?? 1));
+    const nid = normId(defId);
+    const target = Math.ceil((BASE_BUILD_TARGETS[nid] ?? 2) * (this.cfg.targetMul[nid] ?? 1));
     const count = snap.myBuildings.reduce((n, b) => n + (b.defId === defId ? 1 : 0), 0);
     if (count >= target) return 0; // 到顶：直接剔除候选池
     switch (defId) {

@@ -127,6 +127,13 @@
     #mapSelect .map-opt b { display: block; font-size: 15px; letter-spacing: 2px; margin-bottom: 2px; }
     #mapSelect .map-opt span { font-size: 11px; color: #7d8a9c; }
     #mapSelect .seed-row { display: none; align-items: center; gap: 8px; margin: 10px 0 4px; }
+    #mapSelect .fac-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    #mapSelect .fac-row label { width: 72px; color: #9fb0c5; font-size: 13px; }
+    #mapSelect .fac-row select {
+      flex: 1; background: #0b0e13; border: 1px solid #35455c; border-radius: 4px;
+      color: #d7dde6; padding: 6px 8px; font-size: 13px; cursor: pointer;
+    }
+    #mapSelect .fac-row select:focus { border-color: #f0a63c; outline: none; }
     #mapSelect .seed-row label { color: #9fb0c5; font-size: 13px; }
     #mapSelect .seed-row input {
       flex: 1; background: #0b0e13; border: 1px solid #35455c; border-radius: 4px;
@@ -242,7 +249,7 @@
       <button id="btn-log-menu">作 战 日 志</button>
       <button id="btn-exit">退 出</button>
     </div>
-    <div class="ver">v0.14 · 装甲重构 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
+    <div class="ver">v0.15 · 晨曦王国 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
   </div>
 
   <div id="mapSelect">
@@ -255,6 +262,18 @@
         <label>种子</label>
         <input id="seedInput" type="text" inputmode="numeric" maxlength="9" placeholder="留空=随机roll一个" />
         <button id="btn-seed-roll" title="随机一个种子">🎲</button>
+      </div>
+      <div class="fac-row"><label>我的阵营</label>
+        <select id="facPlayer">
+          <option value="steel" selected>钢铁联邦</option>
+          <option value="kingdom">晨曦王国</option>
+        </select>
+      </div>
+      <div class="fac-row"><label>敌方阵营</label>
+        <select id="facAi">
+          <option value="steel" selected>钢铁联邦</option>
+          <option value="kingdom">晨曦王国</option>
+        </select>
       </div>
       <div class="map-btns">
         <button id="btn-map-back">返 回</button>

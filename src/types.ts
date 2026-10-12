@@ -1,5 +1,7 @@
 /** 共享类型定义 */
 
+export type Faction = 'steel' | 'kingdom';   // 阵营：钢铁联邦 / 晨曦王国
+
 export type Res = 'wood' | 'food' | 'ore';
 export type ResAmount = Partial<Record<Res, number>> & { gold?: number };
 
@@ -63,6 +65,8 @@ export interface UnitDef {
   bomber?: boolean;                  // 轰炸机：飞越目标头顶投弹（不停火不悬停）
   armor?: 'light' | 'heavy';         // 装甲类别（减伤表行键；轻/重二元锁死）
   armorPool?: number;                // 装甲池（外层生命；0=无甲，-1=不朽；仅破甲可削）
+  faction?: Faction;                 // 所属阵营（默认steel；王国单位走王国建筑/生产链）
+  deploysInto?: string;              // 展开目标建筑defId（基地车类）
   wild?: 'passive' | 'territorial';  // 野生动物习性（passive不索敌，territorial守家）
   bounty?: ResAmount;                // 击杀缴获（猎食/剿灭奖励）
   mg?: WeaponDef;                    // 舷侧机枪：固定双联，独立索敌/冷却，与主炮互不干扰
@@ -99,6 +103,8 @@ export interface BuildingDef {
   unique?: boolean;            // HQ类
   bounty?: ResAmount;          // 摧毁缴获（蛮族营地等）
   armorPool?: number;          // 装甲池（外层生命；0=无甲，-1=不朽）
+  faction?: Faction;           // 所属阵营（默认steel）
+  isMain?: boolean;            // 主堡（被拆触发战败判定；指挥基地/生命古树）
   shieldPool?: number;         // 护盾发生器：护盾池上限
   shieldRegen?: number;        // 护盾回充速率（脱战5秒后）
   needWater?: boolean;         // 船厂：必须临水

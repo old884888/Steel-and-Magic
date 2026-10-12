@@ -1,5 +1,7 @@
 import { SIM_DT, T_TREE, T_WATER, T_RAMP, T_GRASS, T_FARM, T_ORE, FARM_YIELD, MAP_W, MAP_H } from '../config';
 import { damage } from './combat';
+import { UNIT_DEFS } from '../data/units';
+import { BUILDING_DEFS } from '../data/buildings';
 import { World } from './world';
 import { simTick } from './tick';
 import { AIController } from './ai';
@@ -7,7 +9,7 @@ import { AIController } from './ai';
 /** 基地车开局：把双方基地车都展开成HQ（供需要基地的无头测试用） */
 function deployStartBases(w: World): void {
   for (const e of [...w.entities.values()]) {
-    if (e.kind === 'unit' && e.defId === 'mcv') w.deployMCV(e.id);
+    if (e.kind === 'unit' && (e.defId === 'mcv' || e.defId === 'palaceCart')) w.deployMCV(e.id);
   }
 }
 
@@ -486,6 +488,33 @@ export function runSelftest(): void {
   const t8all = t7 && t8;
   const p6dbg = `t1=${t1} t2=${t2} t3=${t3} t4=${t4} | 坦克血差=${Math.round((z6tk.hp - 140) * 10) / 10} 甲=${Math.round(z6tk.armorHp ?? -1)} | 双修差=${Math.round((hpGain - armorGain) * 10) / 10}`;
 
+
+  // ---- Phase7：王国骨架（阵营/经济同规/交叉对战） ----
+  console.log('[selftest] Phase7：晨曦王国…');
+  // 经济同规：农奴采集/建造与工程车一致
+  const serfDef = UNIT_DEFS['serf'], bldDef = UNIT_DEFS['builder'];
+  const parityOk = serfDef.gather?.rate === bldDef.gather?.rate && serfDef.gather?.capacity === bldDef.gather?.capacity
+    && (serfDef.canBuild?.length ?? 0) > 0;
+
+  // 王国内战（双王国AI）+ 交叉对战（钢铁 vs 王国）各跑一段，不崩且AI正常运转
+  let mirrorOk = true, crossOk = true;
+  const dbg7: string[] = [];
+  for (const [fa, fb] of [['kingdom', 'kingdom'], ['steel', 'kingdom']] as const) {
+    const wx = new World(undefined, 'standard', false, [fa, fb]);
+    const ais = [new AIController(0), new AIController(1)];
+    for (let s = 0; s < 60 * 150; s++) {
+      simTick(wx, SIM_DT, ais);
+      if (wx.gameOver) break;
+    }
+    const mainOk = [...wx.entities.values()].some(e => e.kind === 'building' && BUILDING_DEFS[e.defId].isMain && e.owner === 0);
+    const serfOk = [...wx.entities.values()].some(e => e.defId === (fa === 'kingdom' ? 'serf' : 'builder'));
+    const militiaOk = [...wx.entities.values()].some(e => e.defId === 'militia') || fa === 'steel';
+    const workerOk = [...wx.entities.values()].some(e => e.defId === (fa === 'kingdom' ? 'serf' : 'builder'));
+    dbg7.push(`${fa}/${fb}: main=${mainOk} serf=${serfOk} mil=${militiaOk}`);
+    if (!mainOk || !workerOk) { mirrorOk = false; }
+  }
+  const t9 = parityOk && mirrorOk && crossOk;
+
   // ---- 汇总 ----
   const checks: [string, boolean][] = [
     ['地形健全（高度0~3 + 基地连通）', terrainOk],
@@ -517,6 +546,7 @@ export function runSelftest(): void {
     ['三十息再生：满30s回血/受伤重置/DoT重置', t6],
     ['护盾顺序：盾先吃全额，溢出进装甲', t7],
     ['工程车甲血双修：同速率恢复', t8],
+    ['王国：经济同规+双阵营对战', t9],
   ];
 
   const realSec = ((performance.now() - t0) / 1000).toFixed(1);
@@ -551,5 +581,5 @@ export function runSelftest(): void {
     `AI互殴${Math.floor(w.time / 60)}分钟 · 实体${w.entities.size} · 日志${Object.values(w.log.summary()).reduce((a, b) => a + b, 0)}条 · 实际耗时${realSec}s（详见控制台F12）`
     + (failed.length > 0 ? ` —— 失败项：${failed.join(' / ')}` : '')
     + ` [探针 hq=${dbg.hq} mcv=${dbg.mcv} t=${dbg.time}]`
-    + ` [P6 ${p6dbg}]`;
+    + ` [P6 ${p6dbg}] [P7 ${dbg7.join(' / ')}]`;
 }

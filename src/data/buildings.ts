@@ -1,9 +1,9 @@
-import type { BuildingDef } from '../types';
+import type { BuildingDef, Faction } from '../types';
 
 /** 建筑定义表 —— 数值平衡改这里 */
 export const BUILDING_DEFS: Record<string, BuildingDef> = {
   hq: {
-    id: 'hq', name: '指挥基地', aiRole: 'support', armor: 'heavy', desc: '大本营：生产工程车与农夫、保底产出、+10人口。自带防卫火炮（对空对地溅射）与舷侧机枪（对空对地），独立开火。被摧毁即战败',
+    id: 'hq', name: '指挥基地', aiRole: 'support', armor: 'heavy', faction: 'steel', isMain: true, desc: '大本营：生产工程车与农夫、保底产出、+10人口。自带防卫火炮（对空对地溅射）与舷侧机枪（对空对地），独立开火。被摧毁即战败',
     hp: 800, armorPool: 1500, size: 3, vision: 9,
     cost: {}, buildTime: 0, unique: true, popBonus: 10, isDepot: true,
     income: { wood: 0.2, food: 0.2, ore: 0.2 },
@@ -70,6 +70,51 @@ export const BUILDING_DEFS: Record<string, BuildingDef> = {
     cost: { wood: 80, ore: 120 }, buildTime: 14,
     weapon: { damage: 42, range: 200, minRange: 70, cooldown: 3.0, cat: 'heavy', visual: 'cannon', speed: 260, splash: 26 },
     aiPriority: 42, aiRole: 'defense', armor: 'heavy',
+  },
+  // ================= 晨曦王国（v0.15 M4.0 王国骨架：经济同规，军事自定） =================
+  lifeTree: {
+    id: 'lifeTree', name: '生命古树', aiRole: 'support', armor: 'light', faction: 'kingdom', isMain: true,
+    desc: '王国的根源：生产农奴与行宫马车、+10人口、保底产出、卸货点。被拆而马车尚在=不败',
+    hp: 800, armorPool: 1500, size: 3, vision: 9,
+    cost: {}, buildTime: 0, popBonus: 10, isDepot: true,
+    income: { wood: 0.2, food: 0.2, ore: 0.2 },
+    produces: ['serf', 'palaceCart'],
+  },
+  orchard: {
+    id: 'orchard', name: '果园', aiPriority: 50, aiRole: 'economy', armor: 'light', faction: 'kingdom',
+    desc: '谷粮来源（0.45/秒），+10人口上限，永不枯竭（经济同规）',
+    hp: 160, armorPool: 210, size: 2, vision: 4,
+    cost: { wood: 60 }, buildTime: 10, income: { food: 0.45 }, popBonus: 10,
+  },
+  lumberShed: {
+    id: 'lumberShed', name: '伐木棚', aiPriority: 55, aiRole: 'economy', armor: 'light', faction: 'kingdom',
+    desc: '自动伐木1.0/秒（内部缓冲仓40），需周围4格内≥5棵树，树尽则停（经济同规）',
+    hp: 160, armorPool: 210, size: 2, vision: 4,
+    cost: { wood: 40, food: 30 }, buildTime: 8, income: { wood: 1.0 }, bufferCap: 40, needTrees: true,
+  },
+  silverMine: {
+    id: 'silverMine', name: '秘银晶窟', aiPriority: 60, aiRole: 'economy', armor: 'light', faction: 'kingdom',
+    desc: '自动采秘银1.0/秒（内部缓冲仓50），必须建造在晶矿上，矿尽则停（经济同规）',
+    hp: 180, armorPool: 240, size: 2, vision: 4,
+    cost: { wood: 70 }, buildTime: 9, income: { ore: 1.0 }, bufferCap: 50, needOre: true,
+  },
+  granary: {
+    id: 'granary', name: '粮仓', aiPriority: 40, aiRole: 'economy', armor: 'light', faction: 'kingdom',
+    desc: '存储上限+500、卸货点（经济同规）',
+    hp: 180, armorPool: 240, size: 2, vision: 4,
+    cost: { wood: 50 }, buildTime: 8, capBonus: 500, isDepot: true,
+  },
+  sageTower: {
+    id: 'sageTower', name: '贤者塔', aiPriority: 58, aiRole: 'support', armor: 'light', faction: 'kingdom',
+    desc: '王国的智慧之源：科技研究（共用全局单线科研管线）',
+    hp: 270, armorPool: 360, size: 2, vision: 5,
+    cost: { wood: 120, ore: 80 }, buildTime: 20,
+  },
+  warHall: {
+    id: 'warHall', name: '战团堂', aiPriority: 65, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    desc: '王国的战团：训练民兵与长枪兵',
+    hp: 300, armorPool: 400, size: 3, vision: 5,
+    cost: { wood: 120 }, buildTime: 14, produces: ['militia', 'spearman'],
   },
   tradePost: {
     id: 'tradePost', name: '商贸站', aiPriority: 58, aiRole: 'economy',

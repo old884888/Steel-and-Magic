@@ -10,7 +10,7 @@ import { nearestWalkable } from '../engine/astar';
 import type { Entity } from './entity';
 import type { Wreck, FireZone } from '../types';
 import { makeUnit, makeBuilding } from './entity';
-import type { FxEvent, Projectile, Res, ResAmount, Vec } from '../types';
+import type { FxEvent, Faction, Projectile, Res, ResAmount, Vec } from '../types';
 import { generateMap, type MapVariant } from './mapgen';
 import { spawnNeutrals } from './neutral';
 import { SimLog, type LogCat } from './log';
@@ -38,6 +38,7 @@ export interface PlayerState {
   techs: TechId[];             // 已完成科技
   research: { id: string; remaining: number } | null; // 进行中的研究（科技或纪元，全局单线）
   researchBoosted?: boolean;   // 本次研究已金币加速（1金=2秒限一次）
+  faction: Faction;            // 所属阵营（钢铁联邦/晨曦王国）
 }
 
 /**
@@ -88,11 +89,13 @@ export class World {
 
   readonly seed: number;
   readonly variant: MapVariant;
+  readonly factions: readonly [Faction, Faction];
 
-  constructor(seed = 20261009, variant: MapVariant = 'standard', persistLog = true) {
+  constructor(seed = 20261009, variant: MapVariant = 'standard', persistLog = true, factions: readonly [Faction, Faction] = ['steel', 'steel']) {
     this.log = new SimLog(5000, persistLog);
     this.seed = seed;
     this.variant = variant;
+    this.factions = factions;
     const map = generateMap(seed, variant);
     this.terrain = map.terrain;
     this.height = map.height;
@@ -106,8 +109,8 @@ export class World {
     this.farmPlanted = new Float32Array(MAP_W * MAP_H).fill(-1);
     this.fog = [new Uint8Array(MAP_W * MAP_H), new Uint8Array(MAP_W * MAP_H)];
     this.players = [
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null },
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[0] },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[1] },
     ];
     this.refreshWalkableAll();
     // 舰船通行网格：只有深水可航行（滩头T_FORD是陆地通道，舰船禁行）
@@ -116,12 +119,16 @@ export class World {
       this.navalWalkable[i] = this.terrain[i] === T_WATER ? 1 : 0;
     }
 
-    // 双方开局：2工程车 + 1基地车（基地车展开成指挥基地，见deployMCV）
+    // 双方开局：2工人 + 1基地车（基地车展开成主堡，见deployMCV；王国=农奴+行宫马车→生命古树）
     for (const [owner, base] of [[0, map.playerBase], [1, map.enemyBase]] as const) {
+      const faction = this.factions[owner];
+      const kingdom = faction === 'kingdom';
+      const vehicle = kingdom ? 'palaceCart' : 'mcv';
+      const worker = kingdom ? 'serf' : 'builder';
       const cx = (base.tx + 1.5) * TILE, cy = (base.ty + 1.5) * TILE;
-      this.spawnUnit('mcv', owner as 0 | 1, cx, cy);
-      this.spawnUnit('builder', owner as 0 | 1, cx - 50, cy + 60);
-      this.spawnUnit('builder', owner as 0 | 1, cx + 50, cy + 60);
+      this.spawnUnit(vehicle, owner as 0 | 1, cx, cy);
+      this.spawnUnit(worker, owner as 0 | 1, cx - 50, cy + 60);
+      this.spawnUnit(worker, owner as 0 | 1, cx + 50, cy + 60);
     }
     spawnNeutrals(this);
   }
@@ -594,6 +601,17 @@ export class World {
     return out;
   }
 
+  /** 主堡（指挥基地/生命古树）或待展开基地车——开局镜头/AI锚点用 */
+  findMain(owner: 0 | 1): Entity | undefined {
+    let vehicle: Entity | undefined;
+    for (const e of this.entities.values()) {
+      if (e.owner !== owner) continue;
+      if (e.kind === 'building' && BUILDING_DEFS[e.defId].isMain && e.done) return e;
+      if (e.kind === 'unit' && (e.defId === 'mcv' || e.defId === 'palaceCart')) vehicle = e;
+    }
+    return vehicle;
+  }
+
   findHq(owner: 0 | 1): Entity | undefined {
     for (const e of this.entities.values()) {
       if (e.kind === 'building' && e.defId === 'hq' && e.owner === owner) return e;
@@ -700,21 +718,24 @@ export class World {
   }
 
   /** 基地车展开成指挥基地：以车身为圆心螺旋找合法落点（原地优先），返回新HQ（失败=null） */
+  /** 基地车展开成主堡：以车身为圆心就近找合法落点（原地优先），按单位deploysInto决定（失败=null） */
   deployMCV(mcvId: number): Entity | null {
     const m = this.entities.get(mcvId);
-    if (!m || m.kind !== 'unit' || m.defId !== 'mcv') return null;
+    if (!m || m.kind !== 'unit') return null;
+    const into = UNIT_DEFS[m.defId]?.deploysInto;
+    if (!into) return null;
     const tx0 = Math.round(m.x / TILE - 1.5), ty0 = Math.round(m.y / TILE - 1.5);
     for (let r = 0; r <= 2; r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const tx = tx0 + dx, ty = ty0 + dy;
-          if (!this.canPlace('hq', tx, ty, mcvId).ok) continue;
+          if (!this.canPlace(into, tx, ty, mcvId).ok) continue;
           this.entities.delete(m.id);
-          const hq = this.spawnBuilding('hq', m.owner, tx, ty, true);
-          this.addLog('build', '基地车展开：指挥基地建立', m.owner);
-          this.addFx(hq.x, hq.y, 'hit', 26, 0.5);
-          return hq;
+          const main = this.spawnBuilding(into, m.owner, tx, ty, true);
+          this.addLog('build', `基地车展开：${BUILDING_DEFS[into].name}建立`, m.owner);
+          this.addFx(main.x, main.y, 'hit', 26, 0.5);
+          return main;
         }
       }
     }
