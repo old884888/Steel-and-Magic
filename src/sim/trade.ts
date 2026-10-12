@@ -62,7 +62,9 @@ function updateCaravan(w: World, e: Entity, dt: number): void {
       return;
     }
     if (dist(e.x, e.y, camp.x, camp.y) <= camp.radius() + TILE * 2) {
-      // 到站交割：按路程结算 + 刷新营地停战（贸易即纳贡）
+      // 到站交割：按路程结算 + 刷新营地停战（贸易即纳贡）；先立正别蠕动
+      e.order = { kind: 'idle' };
+      e.path = null;
       const post = (e.homePostId != null ? w.entities.get(e.homePostId) : null) ?? nearestOf(w, e, 'tradePost', true);
       const distTiles = post ? Math.hypot(post.x - camp.x, post.y - camp.y) / 32 : 10;
       e.payout = Math.min(GOLD_TRADE_CAP, GOLD_TRADE_BASE + GOLD_TRADE_PER_10 * Math.floor(distTiles / 10));
@@ -81,6 +83,8 @@ function updateCaravan(w: World, e: Entity, dt: number): void {
     if (!post) return; // 没商贸站可回：原地待命
     e.homePostId = post.id;
     if (dist(e.x, e.y, post.x, post.y) <= post.radius() + TILE * 2) {
+      e.order = { kind: 'idle' };
+      e.path = null;
       e.tradeState = 'toCamp';
       const camp = e.tradeCampId != null ? w.entities.get(e.tradeCampId) : null;
       if (camp && camp.defId === 'camp') walkTo(w, e, { x: camp.x, y: camp.y });

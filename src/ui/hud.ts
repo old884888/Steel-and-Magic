@@ -109,7 +109,7 @@ export class HUD {
     const coro = w.coronation;
     if (crown) {
       crown.style.display = coro ? 'inline-flex' : 'none';
-      if (coro) crown.textContent = `👑 加冕 ${Math.max(0, Math.ceil(coro.endsAt - w.time))}s`;
+      if (coro) crown.textContent = `${coro.owner === 0 ? '' : '敌'}👑 加冕 ${Math.max(0, Math.ceil(coro.endsAt - w.time))}s`;
     }
     const t = Math.floor(w.time);
     set('gametime', `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);

@@ -240,7 +240,14 @@ export class World {
     if (count >= 3) return false;
     if (!this.canAfford(owner, { food: 30 })) return false;
     this.payCost(owner, { food: 30 });
-    const c = this.spawnUnit('caravan', owner, post.x, post.y + post.radius() + TILE);
+    const spawnX = post.x, spawnY = post.y + post.radius() + TILE;
+    const c = this.spawnUnit('caravan', owner, spawnX, spawnY);
+    if (!this.walkableAtWorld(c.x, c.y)) {
+      // 站旁被水/建筑占了：吸附到最近可走格，别让商队出生即卡死
+      const g = nearestWalkable(this.walkable, Math.floor(spawnX / TILE), Math.floor(spawnY / TILE));
+      c.x = (g.x + 0.5) * TILE;
+      c.y = (g.y + 0.5) * TILE;
+    }
     c.homePostId = postId;
     this.addLog('econ', '雇佣商队：踏上商路', owner);
     return true;
