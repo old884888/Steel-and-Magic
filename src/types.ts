@@ -105,6 +105,7 @@ export interface BuildingDef {
   armorPool?: number;          // 装甲池（外层生命；0=无甲，-1=不朽）
   faction?: Faction;           // 所属阵营（默认steel）
   isMain?: boolean;            // 主堡（被拆触发战败判定；指挥基地/生命古树）
+  wonder?: boolean;            // 奇观（落成启动加冕倒计时；被拆则中断）
   shieldPool?: number;         // 护盾发生器：护盾池上限
   shieldRegen?: number;        // 护盾回充速率（脱战5秒后）
   needWater?: boolean;         // 船厂：必须临水

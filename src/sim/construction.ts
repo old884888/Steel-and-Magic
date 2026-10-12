@@ -45,7 +45,7 @@ export function updateConstruction(w: World, dt: number): void {
         w.addFx(b.x, b.y, 'hit', 18, 0.35);
         w.addLog('build', `建成：${def.name}`, b.owner);
         finished.push(b);
-        if (b.defId === 'monument') w.startCoronation(b.owner as 0 | 1, b.id); // 奇观落成：90秒加冕启动
+        if (BUILDING_DEFS[b.defId]?.wonder) w.startCoronation(b.owner as 0 | 1, b.id); // 奇观落成：90秒加冕启动
       }
     } else {
       // 修理（甲血双修）：结构与装甲同速率恢复（钢铁靠车间）

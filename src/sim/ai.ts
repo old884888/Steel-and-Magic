@@ -15,6 +15,11 @@ export const KINGDOM_ALIAS: Record<string, string> = {
   lifeTree: 'hq', palaceCart: 'mcv', serf: 'builder',
   orchard: 'farm', lumberShed: 'lumber', silverMine: 'mine',
   granary: 'storehouse', sageTower: 'lab', warHall: 'barracks',
+  magicWorkshop: 'factory', magicChariot: 'tank', cyclops: 'infantry',
+  mage: 'artillery', ballista: 'artillery', griffin: 'helicopter',
+  flameRoc: 'bomber', dragon: 'mech', thornTower: 'turret',
+  windTower: 'aaTurret', vineMortar: 'artTurret', thornWall: 'wall',
+  wardStone: 'shieldGen', worldSapling: 'monument',
 };
 const normId = (defId: string): string => KINGDOM_ALIAS[defId] ?? defId;
 
@@ -187,7 +192,7 @@ export class AIController {
     }
 
     // ---- 反奇观：敌方纪念碑落成/过半 → 全军强拆（最高优先，冷却压到8秒） ----
-    const foeMon = [...w.entities.values()].find(e => e.defId === 'monument' && e.owner === foe && (e.done || e.progress >= 0.5));
+    const foeMon = [...w.entities.values()].find(e => e.owner === foe && BUILDING_DEFS[e.defId]?.wonder && (e.done || e.progress >= 0.5));
     if (foeMon && army.length >= 3) {
       const fighters = army.filter(u => !isRetreating(u, snap.time));
       if (fighters.length >= 3) {

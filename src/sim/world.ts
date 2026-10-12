@@ -336,7 +336,7 @@ export class World {
       if (o.engagedId === id) o.engagedId = null;
       if (o.order.targetId === id) o.order = { kind: 'idle' };
     }
-    if (e.defId === 'monument' && this.coronation?.monumentId === id) {
+    if (BUILDING_DEFS[e.defId]?.wonder && this.coronation?.monumentId === id) {
       this.coronation = null;
       this.addLog('system', '纪元纪念碑被摧毁，加冕中断！前功尽弃……', e.owner);
     }

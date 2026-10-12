@@ -13,7 +13,7 @@ const KINGDOM_PALETTES = [
   { primary: '#7a5fa8', secondary: '#5a4278', dark: '#3d2b52' },
 ];
 const isKingdomDef = (defId: string): boolean =>
-  ['serf', 'militia', 'spearman', 'palaceCart', 'lifeTree', 'orchard', 'lumberShed', 'silverMine', 'granary', 'sageTower', 'warHall'].indexOf(defId) >= 0;
+  ['serf', 'militia', 'spearman', 'palaceCart', 'lifeTree', 'orchard', 'lumberShed', 'silverMine', 'granary', 'sageTower', 'warHall', 'magicChariot', 'mage', 'ballista', 'griffin', 'flameRoc', 'dragon', 'cyclops', 'magicWorkshop', 'thornTower', 'windTower', 'vineMortar', 'thornWall', 'wardStone', 'worldSapling'].indexOf(defId) >= 0;
 
 function mk(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -489,6 +489,141 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':t', turret);
         break;
       }
+      case 'magicChariot': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(46, 36);
+        for (const [wx, wy] of [[9, 7], [22, 6], [35, 7], [9, 33], [22, 34], [35, 33]]) {
+          circle(ctx, wx, wy, 5.5, '#1a1e24');
+          circle(ctx, wx, wy, 2.4, '#3a4049');
+        }
+        rr(ctx, 4, 10, 48, 20, 6, '#000');
+        rrG(ctx, 5, 11, 46, 18, 5, '#7a5fa8', '#3d2b52');
+        rr(ctx, 33, 12, 12, 16, 4, '#c9b0e8');
+        ctx.fillStyle = '#3f8f6a';
+        ctx.fillRect(8, 24, 40, 3);
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(40, 24);
+        circle(tc, 12, 12, 9, '#5a4278');
+        circle(tc, 12, 12, 5, '#c9b0e8');
+        tc.fillStyle = '#2c2f34'; tc.fillRect(19, 10.4, 17, 3.2);
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'mage': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(20, 22);
+        ctx.save(); ctx.translate(0, 2);
+        circle(ctx, 10, 12, 6, '#7a5fa8');
+        ctx.fillStyle = '#e8c9a0';
+        circle(ctx, 10, 6, 2.2, '#e8c9a0');
+        ctx.fillStyle = '#2c6b4a';
+        ctx.beginPath(); ctx.moveTo(10, 1); ctx.lineTo(15, 7); ctx.lineTo(5, 7); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = 'rgba(122,95,168,.5)';
+        circle(ctx, 5, 15, 2, 'rgba(201,176,232,.6)');
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(18, 10);
+        tc.fillStyle = '#6b4f2a'; tc.fillRect(8, 2, 2.2, 7);
+        circle(tc, 9, 3, 2.6, '#7ec8e8');
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'ballista': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(40, 30);
+        circle(ctx, 9, 22, 6, '#1a1e24'); circle(ctx, 30, 22, 6, '#1a1e24');
+        circle(ctx, 9, 22, 2.4, '#5d4a2f'); circle(ctx, 30, 22, 2.4, '#5d4a2f');
+        rr(ctx, 6, 8, 28, 12, 4, '#7a5f3d');
+        ctx.strokeStyle = '#4a3823'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(16, 4); ctx.lineTo(16, 24); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(10, 8); ctx.lineTo(22, 20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(22, 8); ctx.lineTo(10, 20); ctx.stroke();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(30, 8);
+        tc.strokeStyle = '#2c2f34'; tc.lineWidth = 2.4;
+        tc.beginPath(); tc.moveTo(4, 4); tc.lineTo(26, 4); tc.stroke();
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'griffin': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(40, 24);
+        circle(ctx, 14, 12, 9, '#c9a53c');            // 狮身
+        circle(ctx, 26, 9, 6.5, '#e8c9a0');           // 鹰首
+        ctx.fillStyle = '#ffd76e';
+        ctx.beginPath(); ctx.moveTo(31, 8); ctx.lineTo(36, 10); ctx.lineTo(31, 12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#8a6238';
+        ctx.beginPath(); ctx.ellipse(14, 10, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#d8f0f8'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(16, 8); ctx.quadraticCurveTo(24, 0, 32, 8); ctx.stroke();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(14, 8);
+        tc.fillStyle = '#2c2f34'; tc.fillRect(4, 3, 9, 2.2);
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'flameRoc': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(42, 22);
+        circle(ctx, 16, 11, 8, '#c9564a');
+        ctx.fillStyle = '#ffd76e';
+        ctx.beginPath(); ctx.moveTo(24, 11); ctx.lineTo(38, 4); ctx.lineTo(36, 11); ctx.lineTo(38, 18); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ff9a3c';
+        ctx.beginPath(); ctx.ellipse(20, 11, 9, 4, 0.2, 0, Math.PI * 2); ctx.fill();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(14, 8);
+        tc.fillStyle = '#ff9a3c';
+        circle(tc, 5, 4, 2.5, '#ff9a3c');
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'dragon': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(64, 40);
+        ctx.fillStyle = '#2c6b4a';
+        ctx.beginPath();
+        ctx.moveTo(8, 24); ctx.quadraticCurveTo(26, 6, 48, 14);
+        ctx.quadraticCurveTo(58, 18, 56, 26); ctx.quadraticCurveTo(40, 34, 8, 24);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#3a7534';
+        ctx.beginPath(); ctx.ellipse(30, 18, 16, 7, -0.15, 0, Math.PI * 2); ctx.fill();
+        circle(ctx, 52, 16, 5, '#2c6b4a');
+        circle(ctx, 55, 15, 1.8, '#ffd76e');
+        ctx.fillStyle = '#ff6a2a';
+        ctx.beginPath(); ctx.moveTo(58, 15); ctx.lineTo(64, 17); ctx.lineTo(58, 19); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#1d4a34'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(14, 20); ctx.quadraticCurveTo(4, 14, 2, 24); ctx.stroke();
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(14, 8);
+        tc.fillStyle = '#ff6a2a';
+        circle(tc, 5, 4, 2.5, '#ff6a2a');
+        cache.set(key + ':t', turret);
+        break;
+      }
+      case 'cyclops': {
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(34, 38);
+        rr(ctx, 9, 8, 16, 24, 7, '#8a9a6a');
+        rr(ctx, 11, 2, 12, 10, 5, '#a89a7a');
+        circle(ctx, 17, 8, 2.6, '#1a1e24');
+        circle(ctx, 17, 8, 1.2, '#ffd76e');
+        rr(ctx, 6, 30, 9, 6, 2, '#5d4223');
+        rr(ctx, 19, 30, 9, 6, 2, '#5d4223');
+        ctx.fillStyle = '#c9564a';
+        circle(ctx, 26, 14, 2, '#c9564a');
+        cache.set(key + ':h', hull);
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(14, 8);
+        tc.fillStyle = '#5d4223'; tc.fillRect(4, 3, 8, 2.4);
+        cache.set(key + ':t', turret);
+        break;
+      }
       case 'deer': {
         let ctx: CanvasRenderingContext2D;
         [hull, ctx] = mk(20, 18);
@@ -845,6 +980,82 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         rr(ctx, S / 2 - 8, S - 22, 16, 14, 2, '#20242a');
         break;
       }
+      case 'magicWorkshop': {
+        rr(ctx, 1, 1, S - 2, S - 2, 8, '#3d2b52');
+        rr(ctx, 5, 5, S - 10, S - 10, 5, '#5a4278');
+        rr(ctx, S / 2 - 12, S / 2 - 4, 24, 22, 4, '#7a5fa8');
+        circle(ctx, S / 2, 16, 11, '#c9b0e8');
+        circle(ctx, S / 2, 16, 5, '#ffd76e');
+        ctx.fillStyle = '#2c2f34';
+        ctx.fillRect(S / 2 - 14, S - 18, 28, 5);
+        break;
+      }
+      case 'thornTower': {
+        rr(ctx, S / 2 - 7, S / 2 - 6, 14, S / 2 + 2, 3, '#5d4a2f');
+        circle(ctx, S / 2, S / 2 - 10, 9, '#7a8a4a');
+        ctx.strokeStyle = '#3f8f6a'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+        for (let k = 0; k < 5; k++) {
+          const a2 = (k / 5) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(S / 2 + Math.cos(a2) * 8, S / 2 - 10 + Math.sin(a2) * 8);
+          ctx.lineTo(S / 2 + Math.cos(a2) * 15, S / 2 - 10 + Math.sin(a2) * 15);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'windTower': {
+        rr(ctx, S / 2 - 7, S / 2 - 8, 14, S / 2 + 4, 3, '#5a5f8a');
+        circle(ctx, S / 2, S / 2 - 12, 9, '#7ec8e8');
+        ctx.strokeStyle = '#dceaf2'; ctx.lineWidth = 2;
+        for (let k = 0; k < 3; k++) {
+          const a2 = performance.now() === 0 ? k : k;
+          ctx.beginPath();
+          ctx.moveTo(S / 2, S / 2 - 12);
+          ctx.lineTo(S / 2 + Math.cos(a2 + k) * 14, S / 2 - 12 + Math.sin(a2 + k) * 14);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'vineMortar': {
+        rr(ctx, 6, S / 2 - 4, S - 12, S / 2, 4, '#4a3823');
+        circle(ctx, S / 2, S / 2 - 4, 12, '#4a8a3f');
+        ctx.strokeStyle = '#3f8f6a'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(S / 2 - 10, S / 2 + 2); ctx.quadraticCurveTo(S / 2, S / 2 - 16, S / 2 + 10, S / 2 + 2); ctx.stroke();
+        ctx.fillStyle = '#c9b0e8';
+        circle(ctx, S / 2, S / 2 - 14, 4, '#c9b0e8');
+        break;
+      }
+      case 'thornWall': {
+        rr(ctx, 2, S / 2 - 8, S - 4, 14, 4, '#5d4a2f');
+        ctx.strokeStyle = '#3f8f6a'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+        for (let k = 0; k < 4; k++) {
+          const x2 = 6 + k * (S - 12) / 3;
+          ctx.beginPath(); ctx.moveTo(x2, S / 2 + 4); ctx.lineTo(x2 + 3, S / 2 - 8); ctx.stroke();
+        }
+        break;
+      }
+      case 'wardStone': {
+        rr(ctx, 6, S - 22, S - 12, 16, 4, '#4c4f56');
+        ctx.save(); ctx.translate(S / 2, S / 2 - 2); ctx.rotate(Math.PI / 4);
+        rr(ctx, -10, -10, 20, 20, 4, '#7a5fa8');
+        rr(ctx, -6, -6, 12, 12, 2, '#c9b0e8');
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(201,176,232,.6)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(S / 2, S / 2 - 2, 16, 0, Math.PI * 2); ctx.stroke();
+        break;
+      }
+      case 'worldSapling': {
+        rr(ctx, 6, S - 24, S - 12, 18, 4, '#4a3823');
+        ctx.strokeStyle = '#3a7534'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(S / 2, S - 22); ctx.quadraticCurveTo(S / 2 - 6, S / 2, S / 2, 14); ctx.stroke();
+        ctx.strokeStyle = '#4a8a3f'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(S / 2, S / 2); ctx.lineTo(S / 2 - 14, 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(S / 2, S / 2); ctx.lineTo(S / 2 + 14, 12); ctx.stroke();
+        ctx.fillStyle = '#7ec8e8';
+        circle(ctx, S / 2, 12, 10, '#7ec8e8');
+        circle(ctx, S / 2, 12, 5, '#d8f0f8');
+        break;
+      }
       case 'wall': {
         rr(ctx, 3, 3, S - 6, S - 6, 3, '#6b6f78');
         rr(ctx, 7, 7, S - 14, S - 14, 2, '#8a8f96');
@@ -965,7 +1176,7 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
   return { base, top };
 }
 
-const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, tradePost: 2, monument: 3, barracks: 3, factory: 3, turret: 1, lifeTree: 3, orchard: 2, lumberShed: 2, silverMine: 2, granary: 2, sageTower: 2, warHall: 3 };
+const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, tradePost: 2, monument: 3, barracks: 3, factory: 3, turret: 1, lifeTree: 3, orchard: 2, lumberShed: 2, silverMine: 2, granary: 2, sageTower: 2, warHall: 3, magicWorkshop: 3, thornTower: 1, windTower: 1, vineMortar: 2, thornWall: 1, wardStone: 2, worldSapling: 3 };
 
 // ================= 地块 =================
 

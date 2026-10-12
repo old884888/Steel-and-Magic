@@ -7,7 +7,7 @@ import type { World } from './world';
 
 export function hasLab(w: World, owner: number): boolean {
   for (const e of w.entities.values()) {
-    if (e.kind === 'building' && e.defId === 'lab' && e.done && e.owner === owner) return true;
+    if (e.kind === 'building' && (e.defId === 'lab' || e.defId === 'sageTower') && e.done && e.owner === owner) return true;
   }
   return false;
 }
@@ -45,7 +45,8 @@ export function completeResearch(w: World, owner: 0 | 1): void {
   const era = eraDefOf(id);
   if (era) {
     p.era = era.level;
-    w.addLog('system', `纪元晋升：${era.name}！${era.desc}`, owner);
+    const shown = w.players[owner].faction === 'kingdom' && era.nameKingdom ? era.nameKingdom : era.name;
+    w.addLog('system', `纪元晋升：${shown}！${era.desc}`, owner);
   } else {
     const t = id as TechId;
     if (!p.techs.includes(t)) p.techs.push(t);

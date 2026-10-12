@@ -108,10 +108,10 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityPack> = {
 
 /** 王国权重表（联邦键 → 王国defId；AI思考时归一后查此表） */
 export const KINGDOM_RANK_WEIGHTS: Record<PersonalityId, Record<string, number>> = {
-  balanced: { orchard: 1.2, lumberShed: 1.0, silverMine: 1.0, granary: 0.8, warHall: 1.0, militia: 1.0, spearman: 0.8 },
-  rusher:   { militia: 2.0, warHall: 1.6, orchard: 1.0, spearman: 0.7 },
-  turtler:  { orchard: 1.3, silverMine: 1.2, granary: 1.0, spearman: 1.4 },
-  eco:      { lumberShed: 1.6, silverMine: 1.6, orchard: 1.4, granary: 1.2, sageTower: 1.3 },
+  balanced: { orchard: 1.2, lumberShed: 1.0, silverMine: 1.0, granary: 0.8, warHall: 1.0, militia: 1.0, spearman: 0.8, magicChariot: 1.2, ballista: 1.2, cyclops: 1.0 },
+  rusher:   { militia: 2.0, warHall: 1.6, orchard: 1.0, spearman: 0.7, cyclops: 1.4, griffin: 1.0 },
+  turtler:  { orchard: 1.3, silverMine: 1.2, granary: 1.0, spearman: 1.4, thornTower: 1.5, thornWall: 1.2, windTower: 1.2, vineMortar: 1.2 },
+  eco:      { lumberShed: 1.6, silverMine: 1.6, orchard: 1.4, granary: 1.2, sageTower: 1.3, magicWorkshop: 1.4, dragon: 1.8, ballista: 1.2 },
 };
 
 /** 建筑目标数量基准（×性格targetMul = 实际上限） */
