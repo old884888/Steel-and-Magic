@@ -1,7 +1,7 @@
 import {
   MAP_W, MAP_H, TILE, T_GRASS, T_ORE, T_TREE, T_WATER, T_RAMP, T_FORD, T_FARM,
   START_RES, POP_BASE, POP_MAX, PATH_BUDGET, OWNER_PLAYER,
-  STORAGE_BASE, FARM_YIELD, CORONATION_TIME,
+  STORAGE_BASE, FARM_YIELD,
 } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
@@ -16,9 +16,12 @@ import { spawnNeutrals } from './neutral';
 import { SimLog, type LogCat } from './log';
 import {
   EDICT_MULT, LOGISTICS_POP, LOGISTICS_STORAGE, DEEP_STORAGE_BONUS,
-  TECHS, TECH_MULT, type EdictId, type TechId,
+  TECH_MULT, type EdictId, type TechId,
 } from '../data/policies';
-import { ERAS, ERA_MULT, type EraDef, type EraId } from '../data/eras';
+import { ERA_MULT } from '../data/eras';
+import * as researchSys from './research';
+import * as goldSys from './gold';
+import * as coronationSys from './coronation';
 
 export interface PlayerState {
   res: { wood: number; food: number; ore: number };
@@ -159,119 +162,32 @@ export class World {
     return true;
   }
 
-  hasLab(owner: number): boolean {
-    for (const e of this.entities.values()) {
-      if (e.kind === 'building' && e.defId === 'lab' && e.done && e.owner === owner) return true;
-    }
-    return false;
-  }
+  hasLab(owner: number): boolean { return researchSys.hasLab(this, owner); }
 
   /** 立项研究（全局单线：有研究进行中/已研完/无研究所/付不起 均拒绝）；id可为科技或纪元 */
-  startResearch(owner: 0 | 1, id: string): boolean {
-    const p = this.players[owner];
-    if (p.research || !this.hasLab(owner)) return false;
-    const eraDef: EraDef | undefined = (ERAS as Record<string, EraDef | undefined>)[id];
-    let cost: ResAmount, time: number, name: string;
-    if (eraDef) {
-      if (p.era >= eraDef.level) return false;                                  // 纪元已达
-      if (eraDef.prereq && (ERAS[eraDef.prereq].level > p.era)) return false;   // 前置纪元未达
-      cost = eraDef.cost; time = eraDef.time; name = eraDef.name;
-    } else {
-      const tech = TECHS[id as TechId];
-      if (!tech || p.techs.includes(id as TechId)) return false;
-      cost = tech.cost; time = tech.time; name = tech.name;
-    }
-    if (!this.canAfford(owner, cost)) return false;
-    this.payCost(owner, cost);
-    p.research = { id, remaining: time };
-    this.addLog('system', `开始研究：${name}`, owner);
-    return true;
-  }
+  startResearch(owner: 0 | 1, id: string): boolean { return researchSys.startResearch(this, owner, id); }
 
   /** 研究完成（construction在remaining<=0时调用）：科技入列 / 纪元晋升 */
-  completeResearch(owner: 0 | 1): void {
-    const p = this.players[owner];
-    if (!p.research) return;
-    const id = p.research.id;
-    p.research = null;
-    const eraDef: EraDef | undefined = (ERAS as Record<string, EraDef | undefined>)[id];
-    if (eraDef) {
-      p.era = eraDef.level;
-      this.addLog('system', `纪元晋升：${eraDef.name}！${eraDef.desc}`, owner);
-    } else {
-      const t = id as TechId;
-      if (!p.techs.includes(t)) p.techs.push(t);
-      this.addLog('system', `研究完成：${TECHS[t].name}（${TECHS[t].desc}）`, owner);
-    }
-  }
+  completeResearch(owner: 0 | 1): void { researchSys.completeResearch(this, owner); }
+
+  /** 金币加速科研：1金=2秒，每次研究限一次 */
+  boostResearch(): boolean { return researchSys.boostResearch(this, 0); }
 
   // ================= 金币与商路 =================
 
-  addGold(owner: number, v: number): void {
-    if (owner > 1) return;
-    this.players[owner].gold += v;
-  }
+  addGold(owner: number, v: number): void { goldSys.addGold(this, owner, v); }
 
-  /** 市场卖出：100资源→40金（手动决策，不自动） */
-  marketSell(owner: number, res: Res): boolean {
-    const p = this.players[owner];
-    if (p.res[res] < 100) return false;
-    p.res[res] -= 100;
-    p.gold += 40;
-    return true;
-  }
+  marketSell(owner: number, res: Res): boolean { return goldSys.marketSell(this, owner, res); }
 
-  /** 市场买入：70金→100资源（受存储上限钳制，空间不足100拒买） */
-  marketBuy(owner: number, res: Res): boolean {
-    const p = this.players[owner];
-    if (p.gold < 70) return false;
-    if (p.storageCap - p.res[res] < 100) return false;
-    p.gold -= 70;
-    this.addRes(owner, res, 100);
-    return true;
-  }
+  marketBuy(owner: number, res: Res): boolean { return goldSys.marketBuy(this, owner, res); }
 
-  /** 雇佣商队：食30/个，每座商贸站上限3个，出生在站旁并自动绑定路线 */
-  hireCaravan(postId: number): boolean {
-    const post = this.entities.get(postId);
-    if (!post || post.kind !== 'building' || post.defId !== 'tradePost' || !post.done || post.owner > 1) return false;
-    const owner = post.owner as 0 | 1;
-    const count = [...this.entities.values()].filter(e => e.defId === 'caravan' && (e.homePostId ?? -1) === postId).length;
-    if (count >= 3) return false;
-    if (!this.canAfford(owner, { food: 30 })) return false;
-    this.payCost(owner, { food: 30 });
-    const spawnX = post.x, spawnY = post.y + post.radius() + TILE;
-    const c = this.spawnUnit('caravan', owner, spawnX, spawnY);
-    if (!this.walkableAtWorld(c.x, c.y)) {
-      // 站旁被水/建筑占了：吸附到最近可走格，别让商队出生即卡死
-      const g = nearestWalkable(this.walkable, Math.floor(spawnX / TILE), Math.floor(spawnY / TILE));
-      c.x = (g.x + 0.5) * TILE;
-      c.y = (g.y + 0.5) * TILE;
-    }
-    c.homePostId = postId;
-    this.addLog('econ', '雇佣商队：踏上商路', owner);
-    return true;
-  }
+  hireCaravan(postId: number): boolean { return goldSys.hireCaravan(this, postId); }
 
   // ================= 奇观加冕 =================
 
-  /** 纪念碑落成：90秒加冕倒计时启动（被拆即中断） */
-  startCoronation(owner: 0 | 1, monumentId: number): void {
-    if (this.coronation || this.gameOver !== 0) return;
-    this.coronation = { owner, monumentId, endsAt: this.time + CORONATION_TIME };
-    this.addLog('system', `纪元纪念碑落成！${CORONATION_TIME}秒后加冕——守住它！`, owner);
-  }
+  startCoronation(owner: 0 | 1, monumentId: number): void { coronationSys.startCoronation(this, owner, monumentId); }
 
-  /** 加冕倒计时判定（tick末尾调用） */
-  checkCoronation(): void {
-    const c = this.coronation;
-    if (!c || this.gameOver !== 0) return;
-    if (this.time >= c.endsAt) {
-      this.gameOver = c.owner === OWNER_PLAYER ? 1 : 2;
-      this.lastVictory = 'coronation';
-      this.addLog('system', c.owner === OWNER_PLAYER ? '加冕完成——文明因你而永铸！玩家获胜' : '敌方奇观加冕完成，玩家战败', c.owner);
-    }
-  }
+  checkCoronation(): void { coronationSys.checkCoronation(this); }
 
   /** 地利加成（邻接系统）：农场临水/自动机傍仓库/炮台扼坡道。每5秒与建筑完工时重算 */
   recomputeAdjacency(): void {

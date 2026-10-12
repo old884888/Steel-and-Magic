@@ -37,6 +37,37 @@ function findShieldFor(w: World, target: Entity): Entity | null {
  * 战斗系统：索敌（错峰扫描）→ 交战/停火判定 → 开火（落点弹）→ 弹道推进与落点结算 → 特效计时
  * 落点弹：发射时锁定目标当前位置+散布，落地后在命中半径内结算——移动目标可以闪避，走位即博弈。
  */
+/** 一个单位的订单开火策略：按订单类型决定本帧是否开火/是否停车。返回firing */
+function applyOrderFiring(e: Entity, c: { effRange: number; d: number; inMax: boolean; inMin: boolean }): boolean {
+  let firing = false;
+  if (UNIT_DEFS[e.defId]?.bomber) {
+    // 轰炸机：飞越目标头顶即投弹（冷却好了就投），永不停不悬停
+    if (c.inMax && c.inMin) firing = true;
+  } else if (e.order.kind === 'attack') {
+    // RW式攻击：推进到60%射程（火炮=全射程）站桩，到位前边推进边开火
+    const stopAt = UNIT_DEFS[e.defId].stopToFire ? c.effRange : c.effRange * 0.6;
+    if (c.d <= stopAt) { e.firingHold = true; e.path = null; }
+    if (c.inMax && c.inMin) firing = true;
+    else if (c.inMax && !c.inMin) e.firingHold = true; // 贴脸盲区：愣住
+  } else if (e.order.kind === 'move') {
+    if (c.inMax && c.inMin) {
+      firing = true; // 行进射击：边走边打（全员默认）
+      if (UNIT_DEFS[e.defId].stopToFire) e.firingHold = true; // 唯一例外：自行火炮停车架炮
+    } else if (!c.inMax) e.engagedId = null;
+    else e.firingHold = true; // minRange盲区（只有火炮有）：愣住
+  } else if (e.order.kind === 'attackMove') {
+    if (c.inMax && c.inMin) { e.firingHold = true; firing = true; }
+  } else if (e.order.kind === 'hold') {
+    if (c.inMax && c.inMin) firing = true;
+    else e.engagedId = null;
+  } else {
+    // 建筑与待命单位：站桩开火
+    if (c.inMax && c.inMin) { e.firingHold = true; firing = true; }
+    else if (!c.inMax) e.engagedId = null;
+  }
+  return firing;
+}
+
 export function updateCombat(w: World, dt: number): void {
   // ---- 燃烧DoT结算（喷火武器点燃的目标持续掉血；护盾可挡） ----
   const burning: Entity[] = [];
@@ -145,31 +176,7 @@ export function updateCombat(w: World, dt: number): void {
         const d = dist(e.x, e.y, t.x, t.y) - t.radius();
         const inMax = d <= effRange;
         const inMin = !weapon.minRange || d >= weapon.minRange;
-        if (UNIT_DEFS[e.defId]?.bomber) {
-          // 轰炸机：飞越目标头顶即投弹（冷却好了就投），永不停不悬停
-          if (inMax && inMin) { firing = true; }
-        } else if (e.order.kind === 'attack') {
-          // RW式攻击：推进到60%射程（火炮=全射程）站桩，到位前边推进边开火
-          const stopAt = UNIT_DEFS[e.defId].stopToFire ? effRange : effRange * 0.6;
-          if (d <= stopAt) { e.firingHold = true; e.path = null; }
-          if (inMax && inMin) firing = true;
-          else if (inMax && !inMin) e.firingHold = true; // 贴脸盲区：愣住
-        } else if (e.order.kind === 'move') {
-          if (inMax && inMin) {
-            firing = true; // 行进射击：边走边打（全员默认）
-            if (UNIT_DEFS[e.defId].stopToFire) e.firingHold = true; // 唯一例外：自行火炮停车架炮
-          }
-          else if (!inMax) e.engagedId = null;
-          else e.firingHold = true; // minRange盲区（只有火炮有）：愣住
-        } else if (e.order.kind === 'attackMove') {
-          if (inMax && inMin) { e.firingHold = true; firing = true; }
-        } else if (e.order.kind === 'hold') {
-          if (inMax && inMin) { firing = true; }
-          else e.engagedId = null;
-        } else {
-          if (inMax && inMin) { e.firingHold = true; firing = true; }
-          else if (!inMax) e.engagedId = null;
-        }
+        firing = applyOrderFiring(e, { effRange, d, inMax, inMin });
         if (inMax) {
           const target = Math.atan2(t.y - e.y, t.x - e.x);
           let da = target - e.turretAngle;
