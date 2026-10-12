@@ -21,6 +21,8 @@ export interface AISnapshot {
   foeUnits: Entity[];
   foeComposition: Record<string, number>;      // 敌方部队构成（克制配兵用）
   wood: number; food: number; ore: number;
+  gold: number;                                // 金币（纪元/买粮决策用）
+  era: number;                                 // 纪元（0拓荒/1工业/2钢铁，奇观打分用）
   storageCap: number;
   incomeWood: number;
   incomeFood: number;
@@ -80,6 +82,7 @@ export function takeSnapshot(w: World, owner: 0 | 1, foe: 0 | 1): AISnapshot {
     myBuildings, myUnits, army,
     foeBuildings, foeUnits, foeComposition,
     wood: p.res.wood, food: p.res.food, ore: p.res.ore,
+    gold: p.gold, era: p.era,
     storageCap: p.storageCap,
     incomeWood: p.income.wood,
     incomeFood: p.income.food,

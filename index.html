@@ -69,24 +69,6 @@
     @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
     .toast.fadeout { transition: opacity .5s; opacity: 0; }
 
-    /* ---------- 事件卡 ---------- */
-    #eventCard {
-      position: absolute; top: 110px; left: 50%; transform: translateX(-50%); z-index: 25;
-      width: 360px; background: rgba(26,20,10,.96); border: 1px solid #a06a2c; border-radius: 6px;
-      padding: 12px 14px; font-size: 13px; animation: toastIn .18s ease-out;
-      box-shadow: 0 4px 24px rgba(0,0,0,.5);
-    }
-    #eventCard .ev-title { color: #ffd75e; font-weight: 700; margin-bottom: 6px; letter-spacing: 1px; }
-    #eventCard .ev-desc { color: #d7c9a8; line-height: 1.5; margin-bottom: 8px; font-size: 12px; }
-    #eventCard .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
-    #eventCard button.btn {
-      background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
-      padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
-    }
-    #eventCard button.btn:hover { border-color: #f0a63c; color: #ffd9a0; }
-    #eventCard .ev-bar { height: 4px; background: #1c2735; border-radius: 2px; margin-top: 9px; overflow: hidden; }
-    #eventCard .ev-bar i { display: block; height: 100%; background: #f0a63c; }
-
     /* ---------- 胜负结算 ---------- */
     #overlay {
       position: absolute; inset: 0; z-index: 30; display: none;
@@ -126,6 +108,41 @@
     #menu .menu-btns button.primary { background: #f0a63c; color: #1a1206; font-weight: 800; border: none; }
     #menu .menu-btns button.primary:hover { background: #ffbe5c; }
     #menu .ver { position: absolute; bottom: 16px; color: #4d5a6b; font-size: 12px; letter-spacing: 2px; }
+
+    /* ---------- 选图弹窗 ---------- */
+    #mapSelect {
+      position: absolute; inset: 0; z-index: 42; display: none;
+      align-items: center; justify-content: center; background: rgba(5,8,12,.72);
+    }
+    #mapSelect .modal {
+      width: 420px; background: #131a24; border: 1px solid #2a3546; border-radius: 8px; padding: 22px 26px;
+    }
+    #mapSelect h2 { color: #f0a63c; font-size: 20px; letter-spacing: 6px; margin-bottom: 16px; text-align: center; }
+    #mapSelect .map-opt {
+      display: block; width: 100%; text-align: left; background: #1c2735; border: 1px solid #35455c;
+      color: #d7dde6; border-radius: 5px; padding: 10px 14px; margin-bottom: 8px; cursor: pointer;
+    }
+    #mapSelect .map-opt:hover { border-color: #f0a63c; }
+    #mapSelect .map-opt.active { border-color: #f0a63c; background: #3a3020; }
+    #mapSelect .map-opt b { display: block; font-size: 15px; letter-spacing: 2px; margin-bottom: 2px; }
+    #mapSelect .map-opt span { font-size: 11px; color: #7d8a9c; }
+    #mapSelect .seed-row { display: none; align-items: center; gap: 8px; margin: 10px 0 4px; }
+    #mapSelect .seed-row label { color: #9fb0c5; font-size: 13px; }
+    #mapSelect .seed-row input {
+      flex: 1; background: #0b0e13; border: 1px solid #35455c; border-radius: 4px;
+      color: #ffd9a0; padding: 6px 10px; font-size: 13px; outline: none;
+    }
+    #mapSelect .seed-row input:focus { border-color: #f0a63c; }
+    #mapSelect .seed-row button { background: #1c2735; border: 1px solid #35455c; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
+    #mapSelect .map-btns { display: flex; gap: 10px; margin-top: 16px; }
+    #mapSelect .map-btns button {
+      flex: 1; padding: 10px 0; border-radius: 4px; cursor: pointer; font-size: 15px; letter-spacing: 4px;
+      background: #1c2735; border: 1px solid #35455c; color: #d7dde6;
+    }
+    #mapSelect .map-btns button.primary { background: #f0a63c; border: none; color: #1a1206; font-weight: 800; }
+    #mapSelect .map-btns button.primary:hover { background: #ffbe5c; }
+    #mapSelect .map-btns button:hover { border-color: #f0a63c; color: #ffd9a0; }
+    #mapSelect .map-btns button.primary:hover { color: #1a1206; }
 
     /* ---------- 设置弹窗（占位） ---------- */
     #settings {
@@ -199,6 +216,8 @@
     <span class="res">🌾 <span id="res-food">0</span><span class="rate" id="rate-food"></span></span>
     <span class="res">⛏️ <span id="res-ore">0</span><span class="rate" id="rate-ore"></span></span>
     <span class="res">👥 <span id="pop">0/0</span></span>
+    <span class="res">💰 <span id="gold">0</span></span>
+    <span class="res" id="crown" style="display:none;color:#ffd75e">👑</span>
     <span class="spacer"></span>
     <span class="res" id="gametime">00:00</span>
     <button id="btn-log-top" title="查看作战日志（自动保存，可导出文件）">📜 日志</button>
@@ -207,7 +226,6 @@
   <div id="minimapWrap"><canvas id="minimap" width="176" height="176"></canvas></div>
   <div id="panel"><div class="hint">左键框选部队 · 右键下达指令<br>选中工程车可建造建筑</div></div>
   <div id="toasts"></div>
-  <div id="eventCard" style="display:none"></div>
 
   <div id="overlay">
     <h1 id="overlay-title"></h1>
@@ -224,7 +242,25 @@
       <button id="btn-log-menu">作 战 日 志</button>
       <button id="btn-exit">退 出</button>
     </div>
-    <div class="ver">v0.9 · 科技联邦篇 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
+    <div class="ver">v0.11 · 纪元与商路 · 单机vsAI · 全程AI开发 · 致敬铁锈战争</div>
+  </div>
+
+  <div id="mapSelect">
+    <div class="modal">
+      <h2>选 择 战 场</h2>
+      <button class="map-opt" data-map="standard"><b>标准大陆</b><span>经典双基对峙 · 西东高地 · 中路资源争夺</span></button>
+      <button class="map-opt" data-map="islands"><b>群岛海峡</b><span>双水带三陆地 · 滩头登陆与海权争夺</span></button>
+      <button class="map-opt" data-map="random"><b>随机大陆</b><span>算法镜像生成 · 相同种子=相同地图，可分享给好友</span></button>
+      <div class="seed-row" id="seedRow">
+        <label>种子</label>
+        <input id="seedInput" type="text" inputmode="numeric" maxlength="9" placeholder="留空=随机roll一个" />
+        <button id="btn-seed-roll" title="随机一个种子">🎲</button>
+      </div>
+      <div class="map-btns">
+        <button id="btn-map-back">返 回</button>
+        <button id="btn-map-go" class="primary">开 始 征 途</button>
+      </div>
+    </div>
   </div>
 
   <div id="settings">
@@ -235,6 +271,7 @@
         <select id="set-map">
           <option value="standard" selected>Standard Continent</option>
           <option value="islands">Archipelago Strait</option>
+          <option value="random">Random Continent</option>
         </select>
         <span class="soon">Takes effect on next game</span></div>
       <div class="row"><label>AI difficulty</label>
@@ -309,6 +346,5 @@
     </div>
   </div>
 
-  <script type="module" src="/src/main.ts"></script>
-</body>
+  <script type="module" src="/src/main.ts"></script></body>
 </html>

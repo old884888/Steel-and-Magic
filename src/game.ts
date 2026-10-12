@@ -11,7 +11,9 @@ import type { MapVariant } from './sim/mapgen';
 
 function readMapVariant(): MapVariant {
   try {
-    return localStorage.getItem('sm_map') === 'islands' ? 'islands' : 'standard';
+    const m = localStorage.getItem('sm_map');
+    if (m === 'islands' || m === 'random') return m;
+    return 'standard';
   } catch {
     return 'standard';
   }
@@ -42,7 +44,7 @@ export class Game {
   aiPlayer: AIController | null = null; // selftest 时给玩家也配AI
   private gameShown = false;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement) {
     const mapVariant = readMapVariant();
     this.world = new World(undefined, mapVariant);
     this.renderer = new Renderer(canvas, this.world);
@@ -69,9 +71,10 @@ export class Game {
       (wx, wy) => this.cam.jumpTo(wx, wy),
     );
 
-    // 开局镜头对准玩家基地
-    const hq = this.world.findHq(OWNER_PLAYER);
-    if (hq) this.cam.jumpTo(hq.x, hq.y);
+    // 开局镜头对准基地车（或已展开的基地）
+    const start = this.world.findHq(OWNER_PLAYER) ??
+      [...this.world.entities.values()].find(e => e.kind === 'unit' && e.defId === 'mcv' && e.owner === OWNER_PLAYER);
+    if (start) this.cam.jumpTo(start.x, start.y);
 
     this.loop = new GameLoop(
       (dt) => this.simStep(dt),
@@ -94,7 +97,7 @@ export class Game {
     if (this.world.gameOver !== 0 && !this.gameShown) {
       this.gameShown = true;
       this.world.log.maybeFlush(true); // 终局日志立刻落盘
-      this.hud.showGameOver(this.world.gameOver === 1, this.world.time);
+      this.hud.showGameOver(this.world.gameOver === 1, this.world.time, this.world.lastVictory);
     }
   }
 
@@ -193,6 +196,7 @@ export class Game {
     const target = this.world.pickAt(pos.x, pos.y);
     if (target && target.owner !== OWNER_PLAYER && isVisible(this.world, OWNER_PLAYER, target.x, target.y)) {
       this.world.issueAttack(ids, target.id);
+      this.renderer.attackMarks.set(target.id, this.world.time + 3); // 攻击标记3秒
       this.hud.toast('进攻目标锁定');
       return;
     }
@@ -208,9 +212,9 @@ export class Game {
     }
     // 人工采集：点在树上砍树、点在矿上挖矿（工程车）
     const tx = Math.floor(pos.x / TILE), ty = Math.floor(pos.y / TILE);
-    const tileIdx = ty * 64 + tx;
+    const tileIdx = ty * MAP_W + tx;
     const gatherers = ids.filter(id => UNIT_DEFS[this.world.entities.get(id)!.defId].gather);
-    if (gatherers.length > 0 && tx >= 0 && ty >= 0 && tx < 64 && ty < 64) {
+    if (gatherers.length > 0 && tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H) {
       const t = this.world.terrain[tileIdx];
       if (t === T_TREE) {
         this.world.issueGather(gatherers, tileIdx, 'wood');
@@ -305,6 +309,14 @@ export class Game {
   }
 
   startPlacement(defId: string): void {
+    const def = BUILDING_DEFS[defId];
+    if (def.limitPerPlayer) {
+      const cnt = [...this.world.entities.values()].filter(e => e.owner === OWNER_PLAYER && e.defId === defId).length;
+      if (cnt >= def.limitPerPlayer) { this.hud.toast(`${def.name}已达上限（${def.limitPerPlayer}座）`); return; }
+    }
+    if (defId === 'monument' && this.world.players[OWNER_PLAYER].era < 2) {
+      this.hud.toast('纪元纪念碑需要钢铁纪元'); return;
+    }
     this.input.placementMode = true;
     this.input.attackMoveMode = false;
     this.placement = { defId, view: null };
@@ -392,6 +404,70 @@ export class Game {
 
   /** 菜单背景：渲染一帧静态画面（不启动循环） */
   renderOnce(): void { this.renderFrame(); }
+
+  /** 选图后重开世界：新世界+新渲染器+新AI，状态全部归零 */
+  rebuildWorld(variant: MapVariant, seed: number): void {
+    this.world = new World(seed, variant, true);
+    this.renderer = new Renderer(this.canvas, this.world);
+    this.minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, this.world, this.cam, (wx, wy) => this.cam.jumpTo(wx, wy));
+    this.aiEnemy = new AIController(OWNER_ENEMY, resolveEnemyAIConfig());
+    this.world.players[OWNER_ENEMY].incomeMul = this.aiEnemy.cfg.economyMul;
+    this.aiPlayer = null;
+    this.selection.clear();
+    this.groups.clear();
+    this.placement = null;
+    this.attackMoveMode = false;
+    this.gameShown = false;
+    this.renderer.attackMarks.clear();
+    this.input.cancelModes();
+    updateFog(this.world);
+    const start = this.world.findHq(OWNER_PLAYER) ??
+      [...this.world.entities.values()].find(e => e.kind === 'unit' && e.defId === 'mcv' && e.owner === OWNER_PLAYER);
+    if (start) this.cam.jumpTo(start.x, start.y);
+  }
+
+  /** 选图确认：重建世界并开局 */
+  startGame(choice: { variant: MapVariant; seed: number }): void {
+    this.rebuildWorld(choice.variant, choice.seed);
+    this.start();
+  }
+
+  /** 基地车展开成指挥基地（UI入口） */
+  deployMCV(): void {
+    const mcv = [...this.selection].map(id => this.world.entities.get(id)).find(e => e?.defId === 'mcv');
+    if (!mcv) return;
+    const hq = this.world.deployMCV(mcv.id);
+    if (!hq) { this.hud.toast('此处无法展开（地面不平/有障碍/被占用）'); return; }
+    this.selection.clear();
+    this.selection.add(hq.id);
+    this.hud.toast('指挥基地展开完成');
+  }
+
+  /** 金币加速建造：1金=2秒，每工地限一次 */
+  boostConstruction(bid: number): void {
+    const b = this.world.entities.get(bid);
+    if (!b || b.kind !== 'building' || b.done || b.boosted) return;
+    const def = BUILDING_DEFS[b.defId];
+    const remainSec = (1 - b.progress) * def.buildTime;
+    const cost = Math.max(1, Math.ceil(remainSec / 2));
+    if (!this.world.canAfford(OWNER_PLAYER, { gold: cost })) { this.hud.toast('金币不足'); return; }
+    this.world.payCost(OWNER_PLAYER, { gold: cost });
+    b.progress = Math.min(1, b.progress + (cost * 2) / def.buildTime);
+    b.boosted = true;
+    this.hud.toast('金币加速！机器全速运转');
+  }
+
+  /** 金币加速科研：1金=2秒，每次研究限一次 */
+  boostResearch(): void {
+    const p = this.world.players[0];
+    if (!p.research || p.researchBoosted) return;
+    const cost = Math.max(1, Math.ceil(p.research.remaining / 2));
+    if (p.gold < cost) { this.hud.toast('金币不足'); return; }
+    p.gold -= cost;
+    p.research.remaining -= cost * 2;
+    p.researchBoosted = true;
+    this.hud.toast('金币加速！学者们加班了');
+  }
 
   start(): void {
     this.world.startSession(); // 对局头：真正开局才写

@@ -42,6 +42,7 @@ export interface Entity {
   nSpawnT?: number;         // 营地刷兵倒计时
   nRaidT?: number;          // 营地劫掠倒计时
   nWanderT?: number;        // 动物游荡倒计时
+  nTruceUntil?: number;     // 通商停战截止（商队到访刷新）
 
   // ---- 护盾发生器字段（建筑） ----
   shield?: number;          // 当前护盾池
@@ -65,7 +66,6 @@ export interface Entity {
   // ---- 运营深度系统（建筑可选字段） ----
   adjBonus?: number;        // 地利加成乘数缓存（邻接系统重算）
   adjLabel?: string;        // 地利文案（面板展示）
-  boostUntil?: number;      // 富矿脉事件：产量×2截止时间
 
   // ---- 建造师赶路失败计时（施工中不在射程且无路径的累计秒，超时弃单） ----
   buildWait?: number;
@@ -74,9 +74,19 @@ export interface Entity {
   farmState?: 'toHarvest' | 'toDepot' | 'toPlant' | null;  // 当前工序
   farmTile?: number;        // 目标麦田格（收割/回种共用，收割后保留用于回种）
   jobT?: number;            // 收割/回种动作计时（>0=正在干活）
+  jobDur?: number;          // 动作总时长（进度条用）
 
   // ---- 舷侧机枪 ----
   mgCooldown?: number;      // 机枪独立冷却（与主炮互不干扰）
+
+  // ---- 建造/科研加速（1金=2秒，每工地/科技限一次） ----
+  boosted?: boolean;
+
+  // ---- 商队（贸易循环） ----
+  homePostId?: number;      // 所属商贸站
+  tradeState?: 'toCamp' | 'toHome' | null;
+  tradeCampId?: number;     // 通商的蛮族营地
+  payout?: number;          // 本趟货款（金币）
 
   /** 世界坐标下的碰撞半径（建筑=格尺寸一半） */
   radius(): number;

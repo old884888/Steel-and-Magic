@@ -7,7 +7,7 @@ export const BUILDING_DEFS: Record<string, BuildingDef> = {
     hp: 1200, size: 3, vision: 9,
     cost: {}, buildTime: 0, unique: true, popBonus: 10, isDepot: true,
     income: { wood: 0.2, food: 0.2, ore: 0.2 },
-    produces: ['builder', 'farmer'],
+    produces: ['builder', 'farmer', 'mcv'],
     weapon: { damage: 35, range: 190, cooldown: 3.2, projectile: 'explosive', splash: 26, targetsAir: true },
     mg: { damage: 6, range: 90, cooldown: 0.8, projectile: 'bullet', targetsAir: true },
   },
@@ -70,6 +70,18 @@ export const BUILDING_DEFS: Record<string, BuildingDef> = {
     cost: { wood: 80, ore: 120 }, buildTime: 14,
     weapon: { damage: 42, range: 200, minRange: 70, cooldown: 3.0, projectile: 'cannon', splash: 26 },
     aiPriority: 42, aiRole: 'defense', armor: 'heavy',
+  },
+  tradePost: {
+    id: 'tradePost', name: '商贸站', aiPriority: 58, aiRole: 'economy',
+    desc: '金币的发动机：雇佣商队跑蛮族营地贸易（通商=停战），兼营资源买卖。每家上限2座',
+    hp: 350, size: 2, vision: 5,
+    cost: { wood: 80, food: 40 }, buildTime: 8, limitPerPlayer: 2,
+  },
+  monument: {
+    id: 'monument', name: '纪元纪念碑', aiRole: 'support', armor: 'heavy',
+    desc: '终局奇观：落成后90秒加冕即胜（期间被拆则前功尽弃）。需钢铁纪元，每家限一座',
+    hp: 1500, size: 3, vision: 6,
+    cost: { wood: 1500, food: 1200, ore: 1000, gold: 400 }, buildTime: 180, limitPerPlayer: 1,
   },
   wall: {
     id: 'wall', name: '城墙', desc: '1×1高血量工事：阻挡地面部队推进（空军无视），可互相连接成防线',

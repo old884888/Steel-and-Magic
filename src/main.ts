@@ -148,13 +148,25 @@ function wireLogViewer(game: Game): void {
 }
 
 function boot(): void {
+  (window as unknown as { __bootStage: string }).__bootStage = 'boot-start';
   setupCrashLogger();
   const params = new URLSearchParams(location.search);
 
   // 无头模拟自测模式：跳过主菜单直接跑
   if (params.has('selftest')) {
+    (window as unknown as { __bootStage: string }).__bootStage = 'selftest-start';
     fitCanvas(document.getElementById('game') as HTMLCanvasElement);
-    runSelftest();
+    try {
+      runSelftest();
+    } catch (e) {
+      // 自测本身崩了也要把异常亮在脸上（标题+结算栏），别静默白屏
+      document.title = 'SELFTEST CRASH';
+      const overlay = document.getElementById('overlay') as HTMLElement | null;
+      const sub = document.getElementById('overlay-sub') as HTMLElement | null;
+      if (overlay) overlay.style.display = 'flex';
+      if (sub) sub.textContent = '自测异常：' + String(e).slice(0, 400);
+      console.error(e);
+    }
     return;
   }
 
@@ -178,8 +190,7 @@ function boot(): void {
   game.renderOnce(); // 菜单背后垫一帧基地全景
 
   document.getElementById('btn-start')!.addEventListener('click', () => {
-    menu.style.display = 'none';
-    game.start();
+    document.getElementById('mapSelect')!.style.display = 'flex'; // 先选战场
   });
   document.getElementById('btn-settings')!.addEventListener('click', () => {
     settings.style.display = 'flex';
@@ -196,6 +207,46 @@ function boot(): void {
   wireAISettings();
   wireMapSetting();
   wireLogViewer(game);
+  wireMapSelect(game);
+}
+
+/** 开局选图弹窗：双内置地图 + 随机地图（可输入种子，同种子=同地图） */
+function wireMapSelect(game: Game): void {
+  const $ = (id: string): HTMLElement => document.getElementById(id)!;
+  const modal = $('mapSelect');
+  const seedRow = $('seedRow');
+  const seedInput = $('seedInput') as HTMLInputElement;
+  let sel: 'standard' | 'islands' | 'random' = 'standard';
+  try {
+    const saved = localStorage.getItem('sm_map');
+    if (saved === 'islands' || saved === 'random' || saved === 'standard') sel = saved;
+  } catch { /* ignore */ }
+
+  const paint = (): void => {
+    for (const btn of modal.querySelectorAll('.map-opt')) btn.classList.toggle('active', (btn as HTMLElement).dataset.map === sel);
+    seedRow.style.display = sel === 'random' ? 'flex' : 'none';
+  };
+  for (const btn of modal.querySelectorAll('.map-opt')) {
+    btn.addEventListener('click', () => {
+      sel = ((btn as HTMLElement).dataset.map ?? 'standard') as typeof sel;
+      try { localStorage.setItem('sm_map', sel); } catch { /* ignore */ }
+      paint();
+    });
+  }
+  $('btn-seed-roll').addEventListener('click', () => {
+    seedInput.value = String(Math.floor(Math.random() * 999999999) + 1);
+  });
+  $('btn-map-back').addEventListener('click', () => { modal.style.display = 'none'; });
+  $('btn-map-go').addEventListener('click', () => {
+    const raw = parseInt(seedInput.value, 10);
+    const seed = sel === 'random'
+      ? (Number.isFinite(raw) && raw > 0 ? raw : Math.floor(Math.random() * 999999999) + 1)
+      : 20261009; // 内置地图固定种子（经典布局不变）
+    modal.style.display = 'none';
+    $('menu').style.display = 'none';
+    game.startGame({ variant: sel, seed });
+  });
+  paint();
 }
 
 /** 地图选择持久化（对下一局生效） */
@@ -204,7 +255,7 @@ function wireMapSetting(): void {
   if (!sel) return;
   try {
     const saved = localStorage.getItem('sm_map');
-    if (saved === 'islands' || saved === 'standard') sel.value = saved;
+    if (saved === 'islands' || saved === 'standard' || saved === 'random') sel.value = saved;
   } catch { /* ignore */ }
   sel.addEventListener('change', () => {
     try { localStorage.setItem('sm_map', sel.value); } catch { /* ignore */ }

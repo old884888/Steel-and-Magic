@@ -11,7 +11,7 @@ import { takeSnapshot, applyRetreat, applySpareArtillery, findHighGroundNear, co
 import { tryEnqueue } from './construction';
 
 /** 单位存量上限（性格权重决定"想不想要"，这里是"最多要多少"） */
-const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, farmer: 0 }; // 农夫=玩家侧麦田链专属，AI暂不采用
+const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, farmer: 0, mcv: 0 }; // 农夫/额外基地车：玩家侧专属，AI暂不采用
 
 /**
  * AI指挥官：每 cfg.thinkSec 秒醒来一次。
@@ -27,6 +27,7 @@ export class AIController {
   private waveActive = false;
   private waveUntil = 0;
   private attackCd: number;
+  private lastBuy = 0;              // 上次断粮买食时间（30秒一次）
 
   constructor(owner: 0 | 1, cfg: AIConfig = standardAIConfig()) {
     this.owner = owner;
@@ -47,8 +48,14 @@ export class AIController {
   private think(w: World): void {
     const foe = (1 - this.owner) as 0 | 1;
     const snap = takeSnapshot(w, this.owner, foe);
-    const hq = snap.myBuildings.find(b => b.defId === 'hq');
-    if (!hq) return;
+
+    // ---- 基地车未展开=最高优先级：就近展开，绝不游走（展开前不搞任何建设） ----
+    const myHq = snap.myBuildings.find(b => b.defId === 'hq');
+    if (!myHq) {
+      this.handleNoHq(w, snap);
+      return;
+    }
+    const hq = myHq;
 
     const ctx: TacticCtx = { w, owner: this.owner, foe, cfg: this.cfg, snap, army: snap.army };
     const army = snap.army;
@@ -62,8 +69,30 @@ export class AIController {
       : (w.time > 480 ? 'military' : 'economy'); // 均衡：前期种田，8分钟后转军事
     if (me.edict !== wantEdict && me.edictCd <= 0) w.setEdict(this.owner, wantEdict);
     if (!me.research) {
-      const next = RESEARCH_QUEUES[this.cfg.personalityId].find(id => !me.techs.includes(id));
-      if (next) w.startResearch(this.owner, next);
+      // 纪元节奏（性格驱动）：种田快升、均衡中速、乌龟慢升、莽夫不升
+      const eraAt: [number, number] = this.cfg.personalityId === 'eco' ? [240, 420]
+        : this.cfg.personalityId === 'turtler' ? [420, 700]
+        : this.cfg.personalityId === 'balanced' ? [360, 600]
+        : [Infinity, Infinity];
+      const nextEra: string | null = me.era === 0 && w.time >= eraAt[0] ? 'industrial'
+        : me.era === 1 && w.time >= eraAt[1] ? 'steel' : null;
+      if (nextEra) {
+        w.startResearch(this.owner, nextEra); // 纪元优先占用科研线
+      } else {
+        const next = RESEARCH_QUEUES[this.cfg.personalityId].find(id => !me.techs.includes(id));
+        if (next) w.startResearch(this.owner, next);
+      }
+    }
+    // ---- 商路：有商贸站就补商队（上限3/站）；断粮买食应急 ----
+    const myPosts = snap.myBuildings.filter(b => b.defId === 'tradePost' && b.done);
+    if (myPosts.length > 0) {
+      const caravans = snap.myUnits.filter(u => u.defId === 'caravan').length;
+      if (caravans < myPosts.length * 3 && w.canAfford(this.owner, { food: 30 })) {
+        w.hireCaravan(myPosts[caravans % myPosts.length].id);
+      }
+      if (snap.food < 80 && me.gold >= 70 && w.time - this.lastBuy > 30) {
+        if (w.marketBuy(this.owner, 'food')) this.lastBuy = w.time;
+      }
     }
 
     // ---- 战术模块（并行正交：撤退/保炮车/克制配兵修正） ----
@@ -136,6 +165,18 @@ export class AIController {
       }
     }
 
+    // ---- 反奇观：敌方纪念碑落成/过半 → 全军强拆（最高优先，冷却压到8秒） ----
+    const foeMon = [...w.entities.values()].find(e => e.defId === 'monument' && e.owner === foe && (e.done || e.progress >= 0.5));
+    if (foeMon && army.length >= 3) {
+      const fighters = army.filter(u => !isRetreating(u, snap.time));
+      if (fighters.length >= 3) {
+        w.issueAttack(fighters.map(u => u.id), foeMon.id);
+        this.attackCd = 8;
+        w.addLog('military', '敌方奇观即将落成——全军强拆，义不容辞！', this.owner, 'anti-monument', 20);
+        return;
+      }
+    }
+
     // ---- 进攻波次 ----
     // 满仓判定：库存触顶意味着经济空转，倾巢而出别憋着（仍受攻击冷却约束，防指令刷屏）
     const storageFull = Math.max(snap.wood, snap.food, snap.ore) >= snap.storageCap - 1;
@@ -192,6 +233,33 @@ export class AIController {
     }
   }
 
+  /** 无HQ=基地车还没展开：螺旋找合法落点，原地可开就展开；需挪窝只下一次移动指令（防游走） */
+  private handleNoHq(w: World, snap: AISnapshot): void {
+    const mcv = snap.myUnits.find(u => u.defId === 'mcv');
+    if (!mcv) return; // 车和基地都没了：等战败判定
+    for (let r = 0; r <= 4; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const tx = Math.round(mcv.x / TILE) - 1 + dx;
+          const ty = Math.round(mcv.y / TILE) - 1 + dy;
+          if (!w.canPlace('hq', tx, ty, mcv.id).ok) continue;
+          // 落点在脚下（格线取整±1格误差内）：直接展开，杜绝原地空转
+          const cDist = Math.hypot(mcv.x - (tx + 1.5) * TILE, mcv.y - (ty + 1.5) * TILE);
+          if (cDist <= TILE * 1.2) { w.deployMCV(mcv.id); return; }
+          // 需要挪窝：目标点已在路上就绝不下新指令（防反复寻路游走）
+          const target = { x: (tx + 1.5) * TILE, y: (ty + 1.5) * TILE };
+          const movingThere = mcv.order.kind === 'move' && mcv.order.target &&
+            Math.hypot(mcv.order.target.x - target.x, mcv.order.target.y - target.y) < 8;
+          if (!movingThere) w.issueMove([mcv.id], target);
+          return;
+        }
+      }
+    }
+    // 半径4格全无合法落点（极端地形）：原地兜底展开（deployMCV内部r<=2再找）
+    w.deployMCV(mcv.id);
+  }
+
   /** 单位生产缺口系数（排行用）：存量越少分越高；到顶直接归零（从候选池剔除，防刷屏） */
   private unitNeed(snap: AISnapshot, defId: string): number {
     const cap = UNIT_CAPS[defId] ?? 2;
@@ -227,8 +295,14 @@ export class AIController {
         // 兵营建成后备战升级要趁早（否则永远被农场/仓库插队）
         return snap.myBuildings.some(b => b.defId === 'barracks' && b.done) ? 1.5 : 0.05;
       case 'lab':
-        // 2.5分钟后想要一座立项科研（种田/乌龟性格靠weights加码）
+        // 开局不急着研究：2.5分钟后想要一座（种田/乌龟性格靠weights加码）
         return count === 0 ? (snap.time > 150 ? 1.8 : 0.05) : 0;
+      case 'tradePost':
+        // 商贸站：1分钟后就想盖（种田性格靠weights加码），上限2座
+        return count >= 2 ? 0 : (snap.time > 60 ? 1.3 : 0.4);
+      case 'monument':
+        // 奇观：钢铁纪元解锁后盖（era门槛就是硬闸）
+        return snap.era >= 2 && count === 0 ? 2.5 : 0;
       case 'turret':
         return 0.5;
       default:

@@ -1,6 +1,6 @@
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
-import { TILE } from '../config';
+import { TILE, MAP_W } from '../config';
 import { dist } from '../engine/spatialHash';
 import type { World } from './world';
 import type { Entity } from './entity';
@@ -45,6 +45,7 @@ export function updateConstruction(w: World, dt: number): void {
         w.addFx(b.x, b.y, 'hit', 18, 0.35);
         w.addLog('build', `建成：${def.name}`, b.owner);
         finished.push(b);
+        if (b.defId === 'monument') w.startCoronation(b.owner as 0 | 1, b.id); // 奇观落成：90秒加冕启动
       }
     } else if (b.hp < def.hp) {
       // 修理
@@ -106,7 +107,7 @@ function findFreeSpot(w: World, b: Entity, moveClass?: string): { x: number; y: 
         const x = b.tx + dx, y = b.ty + dy;
         const wx = (x + 0.5) * TILE, wy = (y + 0.5) * TILE;
         if (wantWater) {
-          if (w.terrain[y * 64 + x] !== 1) continue; // 船舶下水点：水面格
+          if (w.terrain[y * MAP_W + x] !== 1) continue; // 船舶下水点：水面格
         } else if (!w.walkableAtTile(x, y)) continue;
         let occupied = false;
         for (const o of w.entities.values()) {

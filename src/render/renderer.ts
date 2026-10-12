@@ -21,6 +21,7 @@ export class Renderer {
   private tctx: CanvasRenderingContext2D;
   private fogC: HTMLCanvasElement;
   private fctx: CanvasRenderingContext2D;
+  attackMarks = new Map<number, number>(); // 攻击目标标记：targetId -> 过期游戏时间
   effects = new EffectsRenderer();
 
   constructor(private canvas: HTMLCanvasElement, private world: World) {
@@ -245,7 +246,7 @@ export class Renderer {
           beams.push({ x0: e.x, y0: e.y - this.world.heightAt(e.x, e.y) * HEIGHT_OFFSET, x1: b.x, y1: b.y - this.world.heightAt(b.x, b.y) * HEIGHT_OFFSET, color: '#ffd76e' });
         }
       } else if (e.order.kind === 'gather' && e.gatherState === 'gathering') {
-        const tx = e.resTile % 64, ty = (e.resTile / 64) | 0;
+        const tx = e.resTile % MAP_W, ty = (e.resTile / MAP_W) | 0;
         const cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE - this.world.height[e.resTile] * HEIGHT_OFFSET;
         const color = e.order.res === 'wood' ? '#9adf9a' : '#ffd76e';
         beams.push({ x0: e.x, y0: e.y - this.world.heightAt(e.x, e.y) * HEIGHT_OFFSET, x1: cx, y1: cy, color });
@@ -268,7 +269,7 @@ export class Renderer {
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     for (const [tile, res] of gatherTiles) {
-      const tx = tile % 64, ty = (tile / 64) | 0;
+      const tx = tile % MAP_W, ty = (tile / MAP_W) | 0;
       const hOff = this.world.height[tile] * HEIGHT_OFFSET;
       const x0 = tx * TILE, y0 = ty * TILE - hOff;
       ctx.strokeStyle = res === 'wood' ? 'rgba(154,223,154,.9)' : 'rgba(255,215,110,.9)';
@@ -309,6 +310,48 @@ export class Renderer {
       ctx.closePath(); ctx.fill();
     }
 
+    // 贸易路线虚线（选中的商贸站）：金色动脉，己方可见
+    for (const id of sel) {
+      const b = this.world.entities.get(id);
+      if (!b || b.kind !== 'building' || b.defId !== 'tradePost' || !b.done) continue;
+      for (const u of this.world.entities.values()) {
+        if (u.defId !== 'caravan' || (u.homePostId ?? -1) !== id || u.tradeCampId == null) continue;
+        const camp = this.world.entities.get(u.tradeCampId);
+        if (!camp) continue;
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = 'rgba(255,215,110,.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(camp.x, camp.y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,215,110,.9)';
+        const mx = (b.x + camp.x) / 2, my = (b.y + camp.y) / 2;
+        ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // 攻击目标标记：旋转的红色四段括号，锁定谁一目了然
+    for (const [tid, until] of this.attackMarks) {
+      if (this.world.time > until) { this.attackMarks.delete(tid); continue; }
+      const t = this.world.entities.get(tid);
+      if (!t) { this.attackMarks.delete(tid); continue; }
+      const tOff = this.world.heightAt(t.x, t.y) * HEIGHT_OFFSET;
+      const r = t.radius() + 7;
+      const pulse = 0.5 + 0.4 * Math.sin(performance.now() / 110);
+      ctx.strokeStyle = `rgba(255,82,58,${pulse})`;
+      ctx.lineWidth = 2;
+      const spin = performance.now() / 500;
+      for (let k = 0; k < 4; k++) {
+        const a = spin + k * Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y - tOff, r, a, a + Math.PI / 3.2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,82,58,.9)';
+      ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('▼ 攻击', t.x, t.y - tOff - r - 4);
+    }
+
     this.drawFog();
     ctx.drawImage(this.fogC, 0, -TOPAD);
 
@@ -326,7 +369,7 @@ export class Renderer {
         ctx.lineWidth = 1.5 / zoom + 0.5;
         ctx.beginPath(); ctx.arc(e.x, cy, def.radius + 5, 0, Math.PI * 2); ctx.stroke();
         const weapon = def.weapon;
-        if (weapon) {
+        if (weapon && sel.size === 1) {
           ctx.strokeStyle = 'rgba(240,166,60,.42)';
           ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(e.x, cy, weapon.range, 0, Math.PI * 2); ctx.stroke();
@@ -405,7 +448,7 @@ export class Renderer {
       ctx.strokeStyle = COLORS.select;
       ctx.lineWidth = 2 / zoom + 1;
       ctx.strokeRect(e.tx * TILE + 1, e.ty * TILE + 1 - hOff, def.size * TILE - 2, def.size * TILE - 2);
-      this.drawRangeRings(e, def.vision);
+      if (sel.size === 1) this.drawRangeRings(e, def.vision); // 多选不画范围圈（防杂乱）
     }
 
     if (!e.done) {
@@ -478,7 +521,7 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(e.x, e.y - hOff, def.radius + 5, 0, Math.PI * 2);
       ctx.stroke();
-      this.drawRangeRings(e, def.vision);
+      if (sel.size === 1) this.drawRangeRings(e, def.vision); // 多选不画范围圈（防杂乱）
     }
 
     // 机甲：先画双腿（底层），再画车身盖住腿根——只露伸出部分
@@ -556,6 +599,10 @@ export class Renderer {
         ctx.drawImage(turret, -turret.width / 2, -turret.height / 2);
         ctx.restore();
       }
+    }
+    // 农夫劳作进度条：收割/回种时显示琥珀条（分清在干活还是在发呆）
+    if (e.defId === 'farmer' && (e.jobT ?? 0) > 0 && e.jobDur) {
+      this.hpBar(e.x, e.y - hOff - def.radius - 10, 16, 1 - (e.jobT ?? 0) / e.jobDur, true);
     }
     // 搬运货物可视化：车顶堆原木/矿石
     if (e.cargo && e.cargo.amt > 0.5) {

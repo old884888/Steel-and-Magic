@@ -1,4 +1,4 @@
-import { TILE, FARM_GROWTH } from '../config';
+import { TILE, FARM_GROWTH, MAP_W } from '../config';
 import { dist } from '../engine/spatialHash';
 import type { World } from './world';
 import type { Entity } from './entity';
@@ -33,7 +33,7 @@ export function updateFarms(w: World, dt: number): void {
 }
 
 function tileCenter(i: number): { x: number; y: number } {
-  return { x: (i % 64) * TILE + TILE / 2, y: ((i / 64) | 0) * TILE + TILE / 2 };
+  return { x: (i % MAP_W) * TILE + TILE / 2, y: ((i / MAP_W) | 0) * TILE + TILE / 2 };
 }
 
 function walkTo(w: World, e: Entity, p: { x: number; y: number }): void {
@@ -93,7 +93,7 @@ function updateFarmer(w: World, e: Entity, dt: number): void {
       e.farmState = null;
       e.farmTile = undefined;
     } else if (e.order.kind === 'idle') {
-      e.jobT = HARVEST_T; // 到田头，弯腰开割
+      e.jobT = HARVEST_T; e.jobDur = HARVEST_T; // 到田头，弯腰开割
       return;
     } else if (e.order.kind !== 'move') {
       walkTo(w, e, tileCenter(e.farmTile!));
@@ -107,7 +107,7 @@ function updateFarmer(w: World, e: Entity, dt: number): void {
       e.farmState = null;
       e.farmTile = undefined;
     } else if (e.order.kind === 'idle') {
-      e.jobT = PLANT_T; // 弯腰补种
+      e.jobT = PLANT_T; e.jobDur = PLANT_T; // 弯腰补种
       return;
     } else if (e.order.kind !== 'move') {
       walkTo(w, e, tileCenter(e.farmTile!));

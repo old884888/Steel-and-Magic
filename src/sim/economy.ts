@@ -32,10 +32,9 @@ export function updateEconomy(w: World, dt: number): void {
 
     if (!def.income) continue;
 
-    // 采集乘数：法令/科技 × 地利加成 × 富矿脉事件
+    // 采集乘数：法令/科技 × 地利加成
     const gm = w.mult(e.owner, 'gather')
-      * (e.defId === 'lumber' || e.defId === 'mine' || e.defId === 'farm' ? (e.adjBonus ?? 1) : 1)
-      * ((e.boostUntil ?? 0) > w.time ? 2 : 1);
+      * (e.defId === 'lumber' || e.defId === 'mine' || e.defId === 'farm' ? (e.adjBonus ?? 1) : 1);
 
     let active = true;
     if (e.defId === 'lumber') active = runExtractor(w, e, 'wood', (def.income.wood ?? 0) * gm, def.bufferCap ?? 30, dt);

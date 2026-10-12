@@ -6,7 +6,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'builder', name: '工程车', aiPriority: 60, aiRole: 'support', armor: 'light', desc: '多功能工程平台：建造/修理建筑，右键树木矿脉可采伐（载货10自动回仓）',
     hp: 100, speed: 70, radius: 10, vision: 6,
     cost: { wood: 60, food: 30 }, buildTime: 8, producedBy: 'hq',
-    canBuild: ['farm', 'lumber', 'mine', 'storehouse', 'lab', 'barracks', 'factory', 'turret', 'aaTurret', 'artTurret', 'shieldGen', 'wall', 'shipyard'],
+    canBuild: ['farm', 'lumber', 'mine', 'storehouse', 'lab', 'barracks', 'factory', 'turret', 'aaTurret', 'artTurret', 'shieldGen', 'wall', 'shipyard', 'tradePost', 'monument'],
     gather: { rate: 2.5, capacity: 10 },   // 人工采集：2.5/秒，载货10（对比自动机低效但灵活）
   },
   infantry: {
@@ -21,6 +21,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     hp: 50, speed: 70, radius: 7, vision: 5,
     cost: { food: 20, wood: 10 }, buildTime: 4, producedBy: 'hq',
   },
+  mcv: {
+    id: 'mcv', name: '基地车', aiPriority: 90, aiRole: 'support', armor: 'heavy', pop: 2,
+    desc: '移动指挥部：选中后点"展开基地"变身指挥基地（可先侦察再落脚）。血厚车沉，丢了它且没有基地=战败',
+    hp: 600, speed: 45, radius: 14, vision: 7,
+    cost: { wood: 200, ore: 200 }, buildTime: 30, producedBy: 'hq',
+  },
   tank: {
     id: 'tank', name: '主战坦克', aiPriority: 72, aiRole: 'combat', armor: 'heavy', desc: '装甲主力：血厚炮猛，主炮之外还有左右舷侧机枪（射步兵弹，独立开火），造价偏高',
     hp: 220, speed: 60, radius: 11, vision: 7,
@@ -29,7 +35,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     mg: { damage: 6, range: 75, cooldown: 0.9, projectile: 'bullet', spread: 4 },
   },
   artillery: {
-    id: 'artillery', name: '自行火炮', aiPriority: 66, aiRole: 'combat', armor: 'light', desc: '超远程榴弹炮：范围溅射拆家利器，皮脆且被贴脸无法还击，需要护卫',
+    id: 'artillery', name: '自行火炮', aiPriority: 66, aiRole: 'combat', armor: 'light', stopToFire: true, desc: '超远程榴弹炮：范围溅射拆家利器，停车架炮开火（唯一不能边走边打），皮脆且被贴脸无法还击，需要护卫',
     hp: 110, speed: 40, radius: 10, vision: 9,
     cost: { ore: 90, wood: 40 }, buildTime: 14, producedBy: 'factory',
     weapon: { damage: 40, range: 215, minRange: 60, cooldown: 3.2, projectile: 'explosive', splash: 28 },
@@ -80,6 +86,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     cost: { wood: 250, ore: 300 }, buildTime: 30, producedBy: 'shipyard', aiPriority: 70, aiRole: 'combat', armor: 'heavy',
     moveClass: 'naval',
     weapon: { damage: 50, range: 200, cooldown: 3.0, projectile: 'shell' },
+  },
+  caravan: {
+    id: 'caravan', name: '商队', aiPriority: 0, aiRole: 'economy', armor: 'light',
+    desc: '移动钱包：自动往返蛮族营地贸易（通商=停战）。无武装，遇袭必死——护好它',
+    hp: 80, speed: 40, radius: 9, vision: 5,
+    cost: { food: 30 }, buildTime: 0, producedBy: 'tradePost',
   },
   deer: {
     id: 'deer', name: '鹿', desc: '温顺的野生动物：受惊会逃跑，猎杀可获得食物',

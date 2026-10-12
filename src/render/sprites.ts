@@ -128,6 +128,37 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':t', turret);
         break;
       }
+      case 'mcv': {
+        // 车体：重型六轮指挥载具（展开后即指挥基地）
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(56, 40);
+        for (const [wx, wy] of [[9, 7], [22, 6], [35, 7], [9, 33], [22, 34], [35, 33]]) {
+          circle(ctx, wx, wy, 6, '#1a1e24');
+          circle(ctx, wx, wy, 2.6, '#3a4049');
+        }
+        rr(ctx, 4, 10, 48, 20, 6, '#000');
+        rrG(ctx, 5, 11, 46, 18, 5, p.primary, p.dark);
+        rr(ctx, 36, 12, 14, 16, 4, p.secondary);  // 指挥舱
+        ctx.fillStyle = '#9fd8ff';
+        ctx.fillRect(42, 14, 6, 12);              // 观察窗
+        ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(10, 14); ctx.lineTo(30, 26); ctx.stroke();
+        ctx.strokeStyle = '#20242a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(12, 11); ctx.lineTo(12, 2); ctx.stroke();
+        circle(ctx, 12, 3, 2.2, '#ff5e4e');
+        ctx.fillStyle = p.primary;
+        ctx.fillRect(16, 24, 12, 4);
+        cache.set(key + ':h', hull);
+        // 炮塔位：折叠指挥桅杆（无武器）
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(20, 10);
+        tc.fillStyle = '#565c66';
+        tc.fillRect(6, 3, 8, 4);
+        tc.fillStyle = '#ffd76e';
+        tc.fillRect(14, 4, 3, 2);
+        cache.set(key + ':t', turret);
+        break;
+      }
       case 'farmer': {
         // 车体…不对，是人体：粗布衣+草帽的田间劳作者
         let ctx: CanvasRenderingContext2D;
@@ -354,6 +385,28 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         ctx.fillStyle = '#1a1e24';
         for (let i = 0; i < 3; i++) ctx.fillRect(cx - 8 + i * 6, cy - 16, 4, 3);
         cache.set(key + ':h', hull);
+        break;
+      }
+      case 'caravan': {
+        // 车体：双轮货车+货袋（移动钱包）
+        let ctx: CanvasRenderingContext2D;
+        [hull, ctx] = mk(30, 26);
+        circle(ctx, 8, 19, 5.5, '#1a1e24'); circle(ctx, 22, 19, 5.5, '#1a1e24');
+        circle(ctx, 8, 19, 2.4, '#5d4a2f'); circle(ctx, 22, 19, 2.4, '#5d4a2f');
+        rr(ctx, 3, 8, 24, 10, 3, '#8a6238');
+        circle(ctx, 10, 8, 4.5, '#c9a53c');
+        circle(ctx, 17, 7, 4, '#a8842e');
+        ctx.fillStyle = p.primary;
+        ctx.fillRect(3, 16, 24, 2);
+        cache.set(key + ':h', hull);
+        // 炮塔位：无武器——小商旗
+        let tc: CanvasRenderingContext2D;
+        [turret, tc] = mk(14, 12);
+        tc.strokeStyle = '#20242a'; tc.lineWidth = 1.6;
+        tc.beginPath(); tc.moveTo(4, 10); tc.lineTo(4, 2); tc.stroke();
+        tc.fillStyle = p.primary;
+        tc.fillRect(4, 2, 7, 3.5);
+        cache.set(key + ':t', turret);
         break;
       }
       case 'deer': {
@@ -713,6 +766,45 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         ctx.fillRect(8, 8, S - 16, 4);
         break;
       }
+      case 'tradePost': {
+        // 泥地基座+站台
+        rr(ctx, 1, 1, S - 2, S - 2, 6, '#5d4a2f');
+        rr(ctx, 5, 5, S - 10, S - 10, 4, '#7a5f3d');
+        // 条纹雨棚
+        rr(ctx, 8, 8, S - 16, 12, 4, p.secondary);
+        ctx.fillStyle = p.primary;
+        for (let i = 0; i < 4; i++) ctx.fillRect(8 + i * ((S - 16) / 4), 8, (S - 16) / 8, 12);
+        // 柜台
+        rr(ctx, 10, 26, S - 20, 10, 2, '#9c7a4d');
+        ctx.fillStyle = '#c9a53c';
+        ctx.fillRect(14, 28, 8, 6);
+        ctx.fillRect(S - 26, 28, 8, 6);
+        // 金币堆
+        circle(ctx, S - 14, S - 14, 4, '#ffd76e');
+        circle(ctx, S - 21, S - 12, 3, '#ffd76e');
+        circle(ctx, 16, S - 12, 3, '#e8c25a');
+        break;
+      }
+      case 'monument': {
+        // 阶梯基座
+        rr(ctx, 6, S - 26, S - 12, 20, 3, '#4c4f56');
+        rr(ctx, 14, S - 42, S - 28, 16, 3, '#565c66');
+        // 方尖碑身
+        ctx.fillStyle = '#c9c9c9';
+        ctx.beginPath();
+        ctx.moveTo(S / 2 - 11, S - 42); ctx.lineTo(S / 2 - 6, 20);
+        ctx.lineTo(S / 2 + 6, 20); ctx.lineTo(S / 2 + 11, S - 42);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#efefef';
+        ctx.fillRect(S / 2 - 4, 26, 3, S - 72);
+        // 金顶
+        circle(ctx, S / 2, 15, 7, '#ffd76e');
+        circle(ctx, S / 2, 15, 3.2, '#fff2c0');
+        // 阵营徽环
+        circle(ctx, S / 2, S - 16, 5, p.primary);
+        circle(ctx, S / 2, S - 16, 2.4, '#fff2c0');
+        break;
+      }
     }
     cache.set(key + ':b', base);
     if (top) cache.set(key + ':t', top);
@@ -720,7 +812,7 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
   return { base, top };
 }
 
-const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, barracks: 3, factory: 3, turret: 1 };
+const BUILDING_SIZE: Record<string, number> = { hq: 3, farm: 2, lumber: 2, mine: 2, storehouse: 2, lab: 2, tradePost: 2, monument: 3, barracks: 3, factory: 3, turret: 1 };
 
 // ================= 地块 =================
 

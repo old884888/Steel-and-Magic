@@ -47,6 +47,9 @@ export function updateMovement(w: World, dt: number): void {
     // ---- 海军：走水面通行网 ----
     const isNaval = def.moveClass === 'naval';
 
+    // 停车架炮（自行火炮）：射程内正在开火时原地不动
+    if (e.firingHold && def.stopToFire) continue;
+
     const goal = moveGoal(w, e);
     if (!goal) { e.path = null; continue; }
 
@@ -93,6 +96,10 @@ function moveGoal(w: World, e: Entity): { x: number; y: number } | null {
   if (e.order.kind === 'attack' && e.order.targetId != null) {
     const t = w.entities.get(e.order.targetId);
     if (!t) return null;
+    // RW式攻击走位：推进到自身射程的60%处站桩开火（火炮=全射程外停车），到位即不再移动
+    const weapon = UNIT_DEFS[e.defId].weapon;
+    const stopAt = weapon ? (UNIT_DEFS[e.defId].stopToFire ? weapon.range : weapon.range * 0.6) : 0;
+    if (dist(e.x, e.y, t.x, t.y) - t.radius() <= stopAt) return null;
     return { x: t.x, y: t.y };
   }
   if (e.order.kind === 'build' && e.order.targetId != null) {
@@ -105,7 +112,7 @@ function moveGoal(w: World, e: Entity): { x: number; y: number } | null {
   if (e.order.kind === 'gather') {
     if (e.gatherState === 'toRes') {
       // 资源格本身不可走，走到其最近可走邻格
-      const tx = e.resTile % 64, ty = (e.resTile / 64) | 0;
+      const tx = e.resTile % MAP_W, ty = (e.resTile / MAP_W) | 0;
       const g = nearestWalkable(w.walkable, tx, ty);
       return { x: (g.x + 0.5) * TILE, y: (g.y + 0.5) * TILE };
     }

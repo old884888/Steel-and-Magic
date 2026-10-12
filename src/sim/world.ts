@@ -1,7 +1,7 @@
 import {
   MAP_W, MAP_H, TILE, T_GRASS, T_ORE, T_TREE, T_WATER, T_RAMP, T_FORD, T_FARM,
   START_RES, POP_BASE, POP_MAX, PATH_BUDGET, OWNER_PLAYER,
-  STORAGE_BASE, FARM_YIELD,
+  STORAGE_BASE, FARM_YIELD, CORONATION_TIME,
 } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
@@ -11,14 +11,14 @@ import type { Entity } from './entity';
 import type { Wreck, FireZone } from '../types';
 import { makeUnit, makeBuilding } from './entity';
 import type { FxEvent, Projectile, Res, ResAmount, Vec } from '../types';
-import { generateMap } from './mapgen';
+import { generateMap, type MapVariant } from './mapgen';
 import { spawnNeutrals } from './neutral';
 import { SimLog, type LogCat } from './log';
-import { EventDirector } from './events';
 import {
   EDICT_MULT, LOGISTICS_POP, LOGISTICS_STORAGE, DEEP_STORAGE_BONUS,
   TECHS, TECH_MULT, type EdictId, type TechId,
 } from '../data/policies';
+import { ERAS, ERA_MULT, type EraDef, type EraId } from '../data/eras';
 
 export interface PlayerState {
   res: { wood: number; food: number; ore: number };
@@ -28,10 +28,13 @@ export interface PlayerState {
   pop: number;
   popCap: number;
   defeat: boolean;
+  gold: number;                // 金币：不可开采、无上限的软通货（贸易/卖资源）
+  era: 0 | 1 | 2;              // 纪元：0拓荒 / 1工业 / 2钢铁
   edict: EdictId | null;       // 当前法令（全局四选一）
   edictCd: number;             // 法令切换冷却（秒）
   techs: TechId[];             // 已完成科技
-  research: { id: TechId; remaining: number } | null; // 进行中的研究（全局单线）
+  research: { id: string; remaining: number } | null; // 进行中的研究（科技或纪元，全局单线）
+  researchBoosted?: boolean;   // 本次研究已金币加速（1金=2秒限一次）
 }
 
 /**
@@ -61,6 +64,9 @@ export class World {
   farmPlanted: Float32Array;  // 播种时刻（-1=未种）
   farmTiles = new Set<number>();
 
+  coronation: { owner: 0 | 1; monumentId: number; endsAt: number } | null = null;
+  lastVictory: 'hq' | 'coronation' = 'hq'; // 胜利方式（结算画面标注）
+
   players: [PlayerState, PlayerState];
 
   projectiles: Projectile[] = [];
@@ -72,18 +78,15 @@ export class World {
   log: SimLog;
   private logRepeat = new Map<string, number>(); // 节流键 -> 上次记录时间
 
-  events = new EventDirector();     // 事件卡调度
-  barbTruceUntil = 0;               // 蛮族停战截止（事件卡效果，neutral读取）
-
   pathBudget = PATH_BUDGET;
   pendingPaths: number[] = [];      // 等待预算的实体id
 
   gameOver = 0;                     // 0进行中 / 1玩家胜 / 2玩家败
 
   readonly seed: number;
-  readonly variant: 'standard' | 'islands';
+  readonly variant: MapVariant;
 
-  constructor(seed = 20261009, variant: 'standard' | 'islands' = 'standard', persistLog = true) {
+  constructor(seed = 20261009, variant: MapVariant = 'standard', persistLog = true) {
     this.log = new SimLog(5000, persistLog);
     this.seed = seed;
     this.variant = variant;
@@ -100,8 +103,8 @@ export class World {
     this.farmPlanted = new Float32Array(MAP_W * MAP_H).fill(-1);
     this.fog = [new Uint8Array(MAP_W * MAP_H), new Uint8Array(MAP_W * MAP_H)];
     this.players = [
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, edict: null, edictCd: 0, techs: [], research: null },
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, edict: null, edictCd: 0, techs: [], research: null },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null },
     ];
     this.refreshWalkableAll();
     // 舰船通行网格：只有深水可航行（滩头T_FORD是陆地通道，舰船禁行）
@@ -110,13 +113,12 @@ export class World {
       this.navalWalkable[i] = this.terrain[i] === T_WATER ? 1 : 0;
     }
 
-    // 双方开局：HQ + 2工程车
+    // 双方开局：2工程车 + 1基地车（基地车展开成指挥基地，见deployMCV）
     for (const [owner, base] of [[0, map.playerBase], [1, map.enemyBase]] as const) {
-      const hq = this.spawnBuilding('hq', owner as 0 | 1, base.tx, base.ty, true);
-      void hq;
-      const cx = (base.tx + 1.5) * TILE, cy = (base.ty + 4.5) * TILE;
-      this.spawnUnit('builder', owner as 0 | 1, cx - 40, cy);
-      this.spawnUnit('builder', owner as 0 | 1, cx + 40, cy);
+      const cx = (base.tx + 1.5) * TILE, cy = (base.ty + 1.5) * TILE;
+      this.spawnUnit('mcv', owner as 0 | 1, cx, cy);
+      this.spawnUnit('builder', owner as 0 | 1, cx - 50, cy + 60);
+      this.spawnUnit('builder', owner as 0 | 1, cx + 50, cy + 60);
     }
     spawnNeutrals(this);
   }
@@ -129,7 +131,7 @@ export class World {
 
   // ================= 法令/科技/地利（运营深度系统） =================
 
-  /** 全局效果乘数：法令×科技叠乘（owner>1恒为1） */
+  /** 全局效果乘数：纪元×法令×科技叠乘（owner>1恒为1） */
   mult(owner: number, kind: 'gather' | 'damage' | 'range' | 'build'): number {
     if (owner > 1) return 1;
     const p = this.players[owner];
@@ -139,6 +141,10 @@ export class World {
     for (const t of p.techs) {
       const tm = TECH_MULT[t]?.[kind];
       if (tm) m *= tm;
+    }
+    for (let era = 1; era <= p.era; era++) {
+      const rm = (ERA_MULT[era] as Partial<Record<string, number>> | undefined)?.[kind];
+      if (rm) m *= rm;
     }
     return m;
   }
@@ -160,26 +166,104 @@ export class World {
     return false;
   }
 
-  /** 立项研究（全局单线：有研究进行中/已研完/无研究所/付不起 均拒绝） */
-  startResearch(owner: 0 | 1, id: TechId): boolean {
+  /** 立项研究（全局单线：有研究进行中/已研完/无研究所/付不起 均拒绝）；id可为科技或纪元 */
+  startResearch(owner: 0 | 1, id: string): boolean {
     const p = this.players[owner];
-    if (p.techs.includes(id) || p.research || !this.hasLab(owner)) return false;
-    const def = TECHS[id];
-    if (!this.canAfford(owner, def.cost)) return false;
-    this.payCost(owner, def.cost);
-    p.research = { id, remaining: def.time };
-    this.addLog('system', `开始研究：${def.name}`, owner);
+    if (p.research || !this.hasLab(owner)) return false;
+    const eraDef: EraDef | undefined = (ERAS as Record<string, EraDef | undefined>)[id];
+    let cost: ResAmount, time: number, name: string;
+    if (eraDef) {
+      if (p.era >= eraDef.level) return false;                                  // 纪元已达
+      if (eraDef.prereq && (ERAS[eraDef.prereq].level > p.era)) return false;   // 前置纪元未达
+      cost = eraDef.cost; time = eraDef.time; name = eraDef.name;
+    } else {
+      const tech = TECHS[id as TechId];
+      if (!tech || p.techs.includes(id as TechId)) return false;
+      cost = tech.cost; time = tech.time; name = tech.name;
+    }
+    if (!this.canAfford(owner, cost)) return false;
+    this.payCost(owner, cost);
+    p.research = { id, remaining: time };
+    this.addLog('system', `开始研究：${name}`, owner);
     return true;
   }
 
-  /** 研究完成（construction在remaining<=0时调用） */
+  /** 研究完成（construction在remaining<=0时调用）：科技入列 / 纪元晋升 */
   completeResearch(owner: 0 | 1): void {
     const p = this.players[owner];
     if (!p.research) return;
-    const t = p.research.id;
+    const id = p.research.id;
     p.research = null;
-    if (!p.techs.includes(t)) p.techs.push(t);
-    this.addLog('system', `研究完成：${TECHS[t].name}（${TECHS[t].desc}）`, owner);
+    const eraDef: EraDef | undefined = (ERAS as Record<string, EraDef | undefined>)[id];
+    if (eraDef) {
+      p.era = eraDef.level;
+      this.addLog('system', `纪元晋升：${eraDef.name}！${eraDef.desc}`, owner);
+    } else {
+      const t = id as TechId;
+      if (!p.techs.includes(t)) p.techs.push(t);
+      this.addLog('system', `研究完成：${TECHS[t].name}（${TECHS[t].desc}）`, owner);
+    }
+  }
+
+  // ================= 金币与商路 =================
+
+  addGold(owner: number, v: number): void {
+    if (owner > 1) return;
+    this.players[owner].gold += v;
+  }
+
+  /** 市场卖出：100资源→40金（手动决策，不自动） */
+  marketSell(owner: number, res: Res): boolean {
+    const p = this.players[owner];
+    if (p.res[res] < 100) return false;
+    p.res[res] -= 100;
+    p.gold += 40;
+    return true;
+  }
+
+  /** 市场买入：70金→100资源（受存储上限钳制，空间不足100拒买） */
+  marketBuy(owner: number, res: Res): boolean {
+    const p = this.players[owner];
+    if (p.gold < 70) return false;
+    if (p.storageCap - p.res[res] < 100) return false;
+    p.gold -= 70;
+    this.addRes(owner, res, 100);
+    return true;
+  }
+
+  /** 雇佣商队：食30/个，每座商贸站上限3个，出生在站旁并自动绑定路线 */
+  hireCaravan(postId: number): boolean {
+    const post = this.entities.get(postId);
+    if (!post || post.kind !== 'building' || post.defId !== 'tradePost' || !post.done || post.owner > 1) return false;
+    const owner = post.owner as 0 | 1;
+    const count = [...this.entities.values()].filter(e => e.defId === 'caravan' && (e.homePostId ?? -1) === postId).length;
+    if (count >= 3) return false;
+    if (!this.canAfford(owner, { food: 30 })) return false;
+    this.payCost(owner, { food: 30 });
+    const c = this.spawnUnit('caravan', owner, post.x, post.y + post.radius() + TILE);
+    c.homePostId = postId;
+    this.addLog('econ', '雇佣商队：踏上商路', owner);
+    return true;
+  }
+
+  // ================= 奇观加冕 =================
+
+  /** 纪念碑落成：90秒加冕倒计时启动（被拆即中断） */
+  startCoronation(owner: 0 | 1, monumentId: number): void {
+    if (this.coronation || this.gameOver !== 0) return;
+    this.coronation = { owner, monumentId, endsAt: this.time + CORONATION_TIME };
+    this.addLog('system', `纪元纪念碑落成！${CORONATION_TIME}秒后加冕——守住它！`, owner);
+  }
+
+  /** 加冕倒计时判定（tick末尾调用） */
+  checkCoronation(): void {
+    const c = this.coronation;
+    if (!c || this.gameOver !== 0) return;
+    if (this.time >= c.endsAt) {
+      this.gameOver = c.owner === OWNER_PLAYER ? 1 : 2;
+      this.lastVictory = 'coronation';
+      this.addLog('system', c.owner === OWNER_PLAYER ? '加冕完成——文明因你而永铸！玩家获胜' : '敌方奇观加冕完成，玩家战败', c.owner);
+    }
   }
 
   /** 地利加成（邻接系统）：农场临水/自动机傍仓库/炮台扼坡道。每5秒与建筑完工时重算 */
@@ -315,17 +399,27 @@ export class World {
       if (this.wrecks.length > 40) this.wrecks.shift();
     }
     this.addLog('military', `${e.owner === 0 ? '我方' : '敌方'}${e.kind === 'building' ? BUILDING_DEFS[e.defId].name : UNIT_DEFS[e.defId].name}被摧毁`, e.owner);
-    // 清理指向它的引用
+    // 摧毁引用清理 + 奇观加冕中断
     for (const o of this.entities.values()) {
       if (o.engagedId === id) o.engagedId = null;
       if (o.order.targetId === id) o.order = { kind: 'idle' };
     }
+    if (e.defId === 'monument' && this.coronation?.monumentId === id) {
+      this.coronation = null;
+      this.addLog('system', '纪元纪念碑被摧毁，加冕中断！前功尽弃……', e.owner);
+    }
     if (e.defId === 'hq') {
-      this.players[e.owner].defeat = true;
-      // 首个基地陷落即定胜负（gameOver只写一次，防止双基地同殁时被翻转）
-      if (this.gameOver === 0) {
-        this.gameOver = e.owner === OWNER_PLAYER ? 2 : 1; // 玩家基地被拆=2败，敌方被拆=1胜
-        this.addLog('system', `指挥基地陷落，${e.owner === 0 ? '玩家战败' : '玩家获胜'}`, e.owner);
+      // 基地没了但基地车还在：不算败——展开新车队即可续命
+      const hasMCV = [...this.entities.values()].some(o => o.defId === 'mcv' && o.owner === e.owner);
+      if (hasMCV) {
+        this.addLog('system', '指挥基地陷落！基地车尚在——展开新车队，重整旗鼓', e.owner);
+      } else {
+        this.players[e.owner].defeat = true;
+        // 首次定胜负（gameOver只写一次，防止双基地同殁时被翻转）
+        if (this.gameOver === 0) {
+          this.gameOver = e.owner === OWNER_PLAYER ? 2 : 1; // 玩家基地被拆=2败，敌方被拆=1胜
+          this.addLog('system', `指挥基地陷落，${e.owner === OWNER_PLAYER ? '玩家战败' : '玩家获胜'}`, e.owner);
+        }
       }
     }
   }
@@ -454,7 +548,7 @@ export class World {
     return -1;
   }
 
-  canPlace(defId: string, tx: number, ty: number): { ok: boolean; reason: string } {
+  canPlace(defId: string, tx: number, ty: number, excludeId?: number): { ok: boolean; reason: string } {
     const def = BUILDING_DEFS[defId];
     if (tx < 1 || ty < 1 || tx + def.size >= MAP_W - 1 || ty + def.size >= MAP_H - 1) {
       return { ok: false, reason: '太靠近地图边缘' };
@@ -481,7 +575,7 @@ export class World {
     this.hash.queryCircle(x0 + px / 2, y0 + px / 2, px, near);
     for (const id of near) {
       const u = this.entities.get(id);
-      if (u && u.kind === 'unit') {
+      if (u && u.kind === 'unit' && u.id !== excludeId) {
         const p = this.hash.pos.get(id);
         if (p && p.x >= x0 - 4 && p.x <= x0 + px + 4 && p.y >= y0 - 4 && p.y <= y0 + px + 4) {
           return { ok: false, reason: '有单位站在施工区' };
@@ -519,7 +613,8 @@ export class World {
 
   canAfford(owner: number, cost: ResAmount): boolean {
     const p = this.players[owner];
-    return (cost.wood ?? 0) <= p.res.wood && (cost.food ?? 0) <= p.res.food && (cost.ore ?? 0) <= p.res.ore;
+    return (cost.wood ?? 0) <= p.res.wood && (cost.food ?? 0) <= p.res.food && (cost.ore ?? 0) <= p.res.ore
+      && (cost.gold ?? 0) <= p.gold;
   }
 
   payCost(owner: number, cost: ResAmount): void {
@@ -527,6 +622,7 @@ export class World {
     p.res.wood -= cost.wood ?? 0;
     p.res.food -= cost.food ?? 0;
     p.res.ore -= cost.ore ?? 0;
+    p.gold -= cost.gold ?? 0;
   }
 
   refundCost(owner: number, cost: ResAmount): void {
@@ -676,6 +772,28 @@ export class World {
       e.gatherState = null;
       e.path = null; e.pathPending = false;
     }
+  }
+
+  /** 基地车展开成指挥基地：以车身为圆心螺旋找合法落点（原地优先），返回新HQ（失败=null） */
+  deployMCV(mcvId: number): Entity | null {
+    const m = this.entities.get(mcvId);
+    if (!m || m.kind !== 'unit' || m.defId !== 'mcv') return null;
+    const tx0 = Math.round(m.x / TILE - 1.5), ty0 = Math.round(m.y / TILE - 1.5);
+    for (let r = 0; r <= 2; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const tx = tx0 + dx, ty = ty0 + dy;
+          if (!this.canPlace('hq', tx, ty, mcvId).ok) continue;
+          this.entities.delete(m.id);
+          const hq = this.spawnBuilding('hq', m.owner, tx, ty, true);
+          this.addLog('build', '基地车展开：指挥基地建立', m.owner);
+          this.addFx(hq.x, hq.y, 'hit', 26, 0.5);
+          return hq;
+        }
+      }
+    }
+    return null;
   }
 
   /** 驻守：原地不动，只对射程内敌人开火，绝不追击 */

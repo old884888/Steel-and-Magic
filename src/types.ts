@@ -1,7 +1,7 @@
 /** 共享类型定义 */
 
 export type Res = 'wood' | 'food' | 'ore';
-export type ResAmount = Partial<Record<Res, number>>;
+export type ResAmount = Partial<Record<Res, number>> & { gold?: number };
 
 export interface Vec { x: number; y: number }
 
@@ -52,6 +52,7 @@ export interface UnitDef {
   bounty?: ResAmount;                // 击杀缴获（猎食/剿灭奖励）
   mg?: WeaponDef;                    // 舷侧机枪：固定双联，独立索敌/冷却，与主炮互不干扰
   pop?: number;                      // 人口占用（默认1；农夫0.5）
+  stopToFire?: boolean;              // 停车架炮：射程内停下开火，不走A（自行火炮专属）
   gather?: {                   // 采集能力（伐木/采矿）
     rate: number;              // 每秒采集量
     capacity: number;          // 载货上限
@@ -85,6 +86,7 @@ export interface BuildingDef {
   shieldPool?: number;         // 护盾发生器：护盾池上限
   shieldRegen?: number;        // 护盾回充速率（脱战5秒后）
   needWater?: boolean;         // 船厂：必须临水
+  limitPerPlayer?: number;     // 每家建造上限（商贸站2/纪念碑1）
 }
 
 export type EntityKind = 'unit' | 'building';

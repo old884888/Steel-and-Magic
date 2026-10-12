@@ -1,11 +1,13 @@
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { EDICTS, TECHS, type EdictId, type TechId } from '../data/policies';
+import { ERAS } from '../data/eras';
+import type { Res } from '../types';
 import type { World } from '../sim/world';
 import { tryEnqueue } from '../sim/construction';
 import type { Game } from '../game';
 
-const RES_ICON: Record<string, string> = { wood: '🪵', food: '🌾', ore: '⛏️' };
+const RES_ICON: Record<string, string> = { wood: '🪵', food: '🌾', ore: '⛏️', gold: '💰' };
 
 function costText(cost: Record<string, number | undefined>): string {
   return Object.entries(cost).filter(([, v]) => v).map(([k, v]) => `${RES_ICON[k]}${v}`).join(' ');
@@ -21,7 +23,6 @@ export class HUD {
   private overlaySub = document.getElementById('overlay-sub')!;
   private refreshT = 0;
   private lastPanelSig = '';
-  private lastEvSig = '';
 
   constructor(private game: Game) {
     this.panel.addEventListener('click', (e) => {
@@ -32,7 +33,18 @@ export class HUD {
       else if (act === 'unit') this.game.queueUnit(arg);
       else if (act === 'rally') this.game.clearRallyHint();
       else if (act === 'paint') this.game.startPaint();
-      else if (act === 'edict') {
+      else if (act === 'deploy') this.game.deployMCV();
+      else if (act === 'boost') this.game.boostConstruction(Number(arg));
+      else if (act === 'boostr') this.game.boostResearch();
+      else if (act === 'hire') {
+        if (!this.game.world.hireCaravan(Number(arg))) this.toast('无法雇佣（食30不足或商队已满）');
+        this.refreshT = 0;
+      } else if (act === 'sell' || act === 'buy') {
+        const w = this.game.world;
+        const ok = act === 'sell' ? w.marketSell(0, arg as Res) : w.marketBuy(0, arg as Res);
+        if (!ok) this.toast(act === 'sell' ? '资源不足100' : '金币不足70或仓库空间不足');
+        this.refreshT = 0;
+      } else if (act === 'edict') {
         const ok = this.game.world.setEdict(0, arg as EdictId);
         if (!ok) this.toast('法令切换冷却中');
         this.refreshT = 0;
@@ -44,13 +56,6 @@ export class HUD {
         }
         this.refreshT = 0;
       }
-    });
-    // 事件卡按钮
-    document.getElementById('eventCard')!.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest('button[data-ev]') as HTMLButtonElement | null;
-      if (!btn) return;
-      this.game.world.events.choose(this.game.world, Number(btn.dataset.ev));
-      this.lastEvSig = '';
     });
   }
 
@@ -64,14 +69,15 @@ export class HUD {
     if (this.toasts.children.length > 4) this.toasts.firstChild?.remove();
   }
 
-  showGameOver(win: boolean, seconds: number): void {
+  showGameOver(win: boolean, seconds: number, method: 'hq' | 'coronation' = 'hq'): void {
     this.overlay.style.display = 'flex';
     this.overlayTitle.textContent = win ? '胜  利' : '战  败';
     this.overlayTitle.className = win ? 'win' : 'lose';
     const mm = Math.floor(seconds / 60), ss = Math.floor(seconds % 60);
-    this.overlaySub.textContent = win
-      ? `敌方指挥基地已化为废墟。耗时 ${mm}分${ss}秒，赛博功德圆满。`
-      : `我方指挥基地陷落。坚持了 ${mm}分${ss}秒，下一次运气会更好的。`;
+    const how = method === 'coronation'
+      ? (win ? '纪元纪念碑加冕完成——文明因你而永铸！' : '敌方奇观加冕完成……下一次，拆了它。')
+      : (win ? '敌方指挥基地已化为废墟。' : '我方指挥基地陷落。');
+    this.overlaySub.textContent = `${how}耗时 ${mm}分${ss}秒。`;
   }
 
   update(dt: number): void {
@@ -80,33 +86,6 @@ export class HUD {
     this.refreshT = 0.25;
     this.refreshTopbar();
     this.refreshPanel();
-    this.refreshEventCard();
-  }
-
-  /** 事件卡：世界里有待决事件就弹卡，倒计时走进度条 */
-  private refreshEventCard(): void {
-    const w = this.game.world;
-    const pd = w.events.pending;
-    const card = document.getElementById('eventCard')!;
-    if (!pd) {
-      if (this.lastEvSig !== '') { card.style.display = 'none'; this.lastEvSig = ''; }
-      return;
-    }
-    const left = Math.max(0, pd.deadline - w.time);
-    const sig = pd.def.id + ':' + Math.ceil(left);
-    const pct = Math.floor((left / 20) * 100); // 决策窗20秒
-    if (sig !== this.lastEvSig) {
-      this.lastEvSig = sig;
-      card.style.display = 'block';
-      card.innerHTML =
-        `<div class="ev-title">⚡ 事件 · ${pd.def.title}</div>` +
-        `<div class="ev-desc">${pd.def.desc}</div>` +
-        `<div class="btnrow">${pd.def.options.map((o, i) => `<button class="btn" data-ev="${i}">${o.label}</button>`).join('')}</div>` +
-        `<div class="ev-bar"><i style="width:${pct}%"></i></div>`;
-    } else {
-      const bar = card.querySelector('.ev-bar i') as HTMLElement | null;
-      if (bar) bar.style.width = pct + '%';
-    }
   }
 
   private refreshTopbar(): void {
@@ -124,6 +103,14 @@ export class HUD {
     const popStr = Number.isInteger(p.pop) ? String(p.pop) : p.pop.toFixed(1);
     pop.textContent = `${popStr}/${p.popCap}`;
     pop.classList.toggle('warn', p.pop >= p.popCap);
+    const goldEl = document.getElementById('gold');
+    if (goldEl) goldEl.textContent = String(Math.floor(p.gold));
+    const crown = document.getElementById('crown');
+    const coro = w.coronation;
+    if (crown) {
+      crown.style.display = coro ? 'inline-flex' : 'none';
+      if (coro) crown.textContent = `👑 加冕 ${Math.max(0, Math.ceil(coro.endsAt - w.time))}s`;
+    }
     const t = Math.floor(w.time);
     set('gametime', `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
     void this.topbar;
@@ -141,7 +128,7 @@ export class HUD {
       if (e.done && (e.adjLabel || e.defId === 'hq' || e.defId === 'lab')) {
         s += `:${e.adjLabel ?? ''}`;
         if (e.defId === 'hq') s += `:${p0.edict ?? ''}:${Math.ceil(p0.edictCd / 5)}`;
-        if (e.defId === 'lab') s += `:${p0.research?.id ?? ''}:${p0.research ? Math.floor((1 - p0.research.remaining / TECHS[p0.research.id].time) * 10) : ''}:${p0.techs.join(',')}`;
+        if (e.defId === 'lab') s += `:${p0.research?.id ?? ''}:${p0.research ? Math.floor((1 - p0.research.remaining / ((ERAS as Record<string, { time: number }>)[p0.research.id]?.time ?? TECHS[p0.research.id as TechId].time)) * 10) : ''}:${p0.techs.join(',')}:${p0.researchBoosted ? 1 : 0}`;
       }
       return s;
     }).join('|') + '#' + (g.placement?.defId ?? '') + '#' + (g.input.paintMode ? 'P' : '');
@@ -179,6 +166,10 @@ export class HUD {
       // 农夫：麦田铺设入口
       if (units.some(u => u.defId === 'farmer')) {
         html += `<div class="btnrow"><button class="btn ${g.input.paintMode ? 'active' : ''}" data-act="paint:farm">开垦麦田<span class="cost">🪵5/格 · 拖框铺设</span></button></div>`;
+      }
+      // 基地车：展开基地
+      if (units.some(u => u.defId === 'mcv')) {
+        html += `<div class="btnrow"><button class="btn" data-act="deploy:mcv">展开基地<span class="cost">原地变身指挥基地</span></button></div>`;
       }
       if (sig !== this.lastPanelSig) { this.panel.innerHTML = html; this.lastPanelSig = sig; }
       return;
@@ -218,8 +209,14 @@ export class HUD {
       const def = BUILDING_DEFS[b.defId];
       let html = `<h3>${def.name} <span class="hp">${b.done ? `${Math.ceil(b.hp)} HP` : `施工中 ${Math.floor(b.progress * 100)}%`}</span></h3>`;
       if (def.desc) html += `<div class="hint" style="font-size:12px; line-height:1.5">${def.desc}</div>`;
+      // 建筑加速（未完工且未加速过）：1金=2秒
+      if (!b.done && !b.boosted && def.buildTime > 4) {
+        const remainSec = (1 - b.progress) * def.buildTime;
+        const boostCost = Math.max(1, Math.ceil(remainSec / 2));
+        html += `<button class="btn" data-act="boost:${b.id}" ${p0.gold >= boostCost ? '' : 'disabled'}>⚡金币加速<span class="cost">${boostCost}💰 = 立省${Math.floor(remainSec)}s</span></button>`;
+      }
       // 地利加成展示
-      if (b.done && b.adjLabel) html += `<div class="queue" style="color:#9fd18f">地利：${b.adjLabel}${(b.boostUntil ?? 0) > w.time ? ' · <span style="color:#ffd75e">富矿脉×2</span>' : ''}</div>`;
+      if (b.done && b.adjLabel) html += `<div class="queue" style="color:#9fd18f">地利：${b.adjLabel}</div>`;
       // HQ：法令四选一
       if (b.done && b.defId === 'hq') {
         const p = w.players[0];
@@ -231,9 +228,18 @@ export class HUD {
         }
         html += `</div>`;
       }
-      // 研究所：科技立项
+      // 研究所：纪元晋升 + 科技立项
       if (b.done && b.defId === 'lab') {
         const p = w.players[0];
+        html += `<div class="hint" style="font-size:12px;margin-top:4px">纪元晋升（当前：${['拓荒', '工业', '钢铁'][p.era]}纪元）：</div><div class="btnrow">`;
+        for (const era of Object.values(ERAS)) {
+          const reached = p.era >= era.level;
+          const locked = era.prereq ? p.era < ERAS[era.prereq].level : false;
+          const busy = !!p.research;
+          const afford = w.canAfford(0, era.cost);
+          html += `<button class="btn" data-act="tech:${era.id}" ${reached || busy || locked || !afford ? 'disabled' : ''}>${era.name}<span class="cost">${reached ? '✔ 当前纪元' : locked ? '需前置纪元' : `${costText(era.cost)} · ${era.time}s`}</span></button>`;
+        }
+        html += `</div>`;
         html += `<div class="hint" style="font-size:12px;margin-top:4px">科技立项（全局单线）：</div><div class="btnrow">`;
         for (const t of Object.values(TECHS)) {
           const done = p.techs.includes(t.id);
@@ -241,6 +247,32 @@ export class HUD {
           html += `<button class="btn" data-act="tech:${t.id}" ${done || busy || !w.canAfford(0, t.cost) ? 'disabled' : ''}>${t.name}<span class="cost">${done ? '✔ 已完成' : busy ? '研究占用中' : `${costText(t.cost)} · ${t.time}s`}</span></button>`;
         }
         html += `</div>`;
+      }
+      // 商贸站：商队雇佣 + 资源市场
+      if (b.done && b.defId === 'tradePost') {
+        const caravans = [...w.entities.values()].filter(e => e.defId === 'caravan' && (e.homePostId ?? -1) === b.id).length;
+        html += `<div class="hint" style="font-size:12px;margin-top:4px">商队：${caravans}/3（自动往返蛮族营地，通商=停战）</div>`;
+        html += `<div class="btnrow"><button class="btn" data-act="hire:${b.id}" ${p0.res.food >= 30 && caravans < 3 ? '' : 'disabled'}>雇佣商队<span class="cost">🌾30 · 跑商赚金</span></button></div>`;
+        html += `<div class="hint" style="font-size:12px;margin-top:4px">市场：</div><div class="btnrow">`;
+        for (const res of ['wood', 'food', 'ore'] as Res[]) {
+          const icon = RES_ICON[res];
+          html += `<button class="btn" data-act="sell:${res}" ${p0.res[res] >= 100 ? '' : 'disabled'}>卖${icon}100<span class="cost">→ 💰40</span></button>`;
+        }
+        html += `</div><div class="btnrow">`;
+        for (const res of ['wood', 'food', 'ore'] as Res[]) {
+          const icon = RES_ICON[res];
+          const spaceOk = p0.storageCap - p0.res[res] >= 100;
+          html += `<button class="btn" data-act="buy:${res}" ${p0.gold >= 70 && spaceOk ? '' : 'disabled'}>买${icon}100<span class="cost">💰70</span></button>`;
+        }
+        html += `</div>`;
+      }
+      // 纪念碑：加冕倒计时
+      if (b.done && b.defId === 'monument') {
+        const c = w.coronation;
+        if (c && c.monumentId === b.id) {
+          const left = Math.max(0, Math.ceil(c.endsAt - w.time));
+          html += `<div class="queue" style="color:#ffd75e">👑 加冕倒计时：<b>${left}s</b>——守住它！<div class="queuebar"><i style="width:${Math.floor((1 - left / 90) * 100)}%"></i></div></div>`;
+        }
       }
       if (b.done && def.produces) {
         html += `<div class="btnrow">`;
@@ -271,9 +303,14 @@ export class HUD {
       // 研究进度（进度挂在玩家身上，不在建筑队列里）
       let resPct = -1;
       if (b.done && b.defId === 'lab' && p0.research) {
-        const td = TECHS[p0.research.id];
-        resPct = Math.floor((1 - p0.research.remaining / td.time) * 100);
-        html += `<div class="queue">研究中：${td.name}（${td.desc}）<div class="queuebar"><i data-rbar style="width:${resPct}%"></i></div></div>`;
+        const rdef = (ERAS as Record<string, { name: string; time: number }>)[p0.research.id] ?? TECHS[p0.research.id as TechId];
+        resPct = Math.floor((1 - p0.research.remaining / rdef.time) * 100);
+        html += `<div class="queue">研究中：${rdef.name}<div class="queuebar"><i data-rbar style="width:${resPct}%"></i></div></div>`;
+        // 金币加速（1金=2秒，每项研究限一次）
+        if (!p0.researchBoosted) {
+          const boostCost = Math.max(1, Math.ceil(p0.research.remaining / 2));
+          html += `<button class="btn" data-act="boostr" ${p0.gold >= boostCost ? '' : 'disabled'}>⚡金币加速<span class="cost">${boostCost}💰 = 立省${Math.floor(p0.research.remaining)}s</span></button>`;
+        }
       }
       if (sig !== this.lastPanelSig) {
         this.panel.innerHTML = html;

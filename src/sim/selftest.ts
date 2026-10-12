@@ -1,7 +1,14 @@
-import { SIM_DT, T_TREE, T_WATER, T_RAMP, T_GRASS, T_FARM, FARM_YIELD } from '../config';
+import { SIM_DT, T_TREE, T_WATER, T_RAMP, T_GRASS, T_FARM, T_ORE, FARM_YIELD, MAP_W, MAP_H } from '../config';
 import { World } from './world';
 import { simTick } from './tick';
 import { AIController } from './ai';
+
+/** 基地车开局：把双方基地车都展开成HQ（供需要基地的无头测试用） */
+function deployStartBases(w: World): void {
+  for (const e of [...w.entities.values()]) {
+    if (e.kind === 'unit' && e.defId === 'mcv') w.deployMCV(e.id);
+  }
+}
 
 /**
  * 无头模拟自测（无渲染），两阶段：
@@ -19,24 +26,57 @@ export function runSelftest(): void {
   {
     // BFS连通（与mapgen同规则，二次校验）：多源=玩家基地下方一排，多目标=敌方基地上方一排
     // （不能直接用基地格——上面盖着HQ建筑，walkable=0）
-    const seen = new Uint8Array(64 * 64);
+    const seen = new Uint8Array(MAP_W * MAP_H);
     const stack: number[] = [];
-    for (let x = 6; x <= 9; x++) { const i = 9 * 64 + x; if (w.walkable[i]) { seen[i] = 1; stack.push(i); } }
+    for (let x = 12; x <= 15; x++) { const i = 18 * MAP_W + x; if (w.walkable[i]) { seen[i] = 1; stack.push(i); } }
     const goals = new Set<number>();
-    for (let x = 54; x <= 57; x++) goals.add(53 * 64 + x);
+    for (let x = 109; x <= 114; x++) goals.add(109 * MAP_W + x);
     let reached = false;
     while (stack.length > 0 && !reached) {
       const cur = stack.pop()!;
       if (goals.has(cur)) { reached = true; break; }
-      const cx = cur % 64, cy = (cur / 64) | 0;
+      const cx = cur % MAP_W, cy = (cur / MAP_W) | 0;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nx = cx + dx, ny = cy + dy;
-        if (nx < 0 || ny < 0 || nx >= 64 || ny >= 64) continue;
-        const ni = ny * 64 + nx;
+        if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+        const ni = ny * MAP_W + nx;
         if (!seen[ni] && w.canStand(cur, ni)) { seen[ni] = 1; stack.push(ni); }
       }
     }
     if (!reached) terrainOk = false;
+  }
+
+  // 随机地图健全性：3个种子抽查（高度上限/资源存在/基地车连通）
+  let randomOk = true;
+  for (const rs of [111, 5150, 987654321]) {
+    const wr = new World(rs, 'random', false);
+    let hMax = 0, trees = 0, ore = 0;
+    for (let i = 0; i < wr.terrain.length; i++) {
+      hMax = Math.max(hMax, wr.height[i]);
+      if (wr.terrain[i] === T_TREE) trees++;
+      if (wr.terrain[i] === T_ORE) ore++;
+    }
+    if (hMax > 3 || trees < 40 || ore < 12) { randomOk = false; break; }
+    const m0 = [...wr.entities.values()].find(e => e.defId === 'mcv' && e.owner === 0)!;
+    const m1 = [...wr.entities.values()].find(e => e.defId === 'mcv' && e.owner === 1)!;
+    const s0 = ((m0.y / 32) | 0) * MAP_W + ((m0.x / 32) | 0);
+    const goal = ((m1.y / 32) | 0) * MAP_W + ((m1.x / 32) | 0);
+    const seenR = new Uint8Array(MAP_W * MAP_H);
+    const stackR: number[] = [s0];
+    seenR[s0] = 1;
+    let reach2 = false;
+    while (stackR.length > 0) {
+      const cur = stackR.pop()!;
+      if (cur === goal) { reach2 = true; break; }
+      const cx = cur % MAP_W, cy = (cur / MAP_W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+        const ni = ny * MAP_W + nx;
+        if (!seenR[ni] && wr.canStand(cur, ni)) { seenR[ni] = 1; stackR.push(ni); }
+      }
+    }
+    if (!reach2) { randomOk = false; break; }
   }
   const ais: (AIController | null)[] = [new AIController(0), new AIController(1)];
   const maxTicks = 60 * 60 * 5;
@@ -72,6 +112,7 @@ export function runSelftest(): void {
   // ---- Phase2：人工采集专项 ----
   console.log('[selftest] Phase2：人工采集链路（砍树→回仓入库）…');
   const w2 = new World(undefined, 'standard', false);
+  deployStartBases(w2);
   const builder = [...w2.entities.values()].find(e => e.kind === 'unit' && e.defId === 'builder' && e.owner === 0)!;
   let treeTile = -1;
   for (let i = 0; i < w2.terrain.length && treeTile < 0; i++) {
@@ -92,9 +133,10 @@ export function runSelftest(): void {
     gatherMsg = gatherOk ? '' : `入库日志不足（${w2.log.count('econ', 0, m => m.includes('入库'))}条）`;
   }
 
-  // ---- Phase3：法令/科技/地利/事件专项 ----
-  console.log('[selftest] Phase3：法令/科技/地利/事件链路…');
+  // ---- Phase3：法令/科技/地利专项 ----
+  console.log('[selftest] Phase3：法令/科技/地利链路…');
   const w3 = new World(undefined, 'standard', false);
+  deployStartBases(w3);
 
   // 法令：切换生效 + 冷却锁 + 乘数
   const edictOk = w3.setEdict(0, 'economy') && Math.abs(w3.mult(0, 'gather') - 1.1) < 1e-9
@@ -103,15 +145,15 @@ export function runSelftest(): void {
 
   // 地利：农场临水加成
   let farmOk = false;
-  for (let ty = 2; ty < 61 && !farmOk; ty++) {
-    for (let tx = 2; tx < 61; tx++) {
+  for (let ty = 2; ty < MAP_H - 3 && !farmOk; ty++) {
+    for (let tx = 2; tx < MAP_W - 3; tx++) {
       if (!w3.canPlace('farm', tx, ty).ok) continue;
       let water = 0;
       for (let dy = -1; dy <= 2 && water < 2; dy++) {
         for (let dx = -1; dx <= 2; dx++) {
           const edge = dx < 0 || dy < 0 || dx > 1 || dy > 1;
           if (!edge) continue;
-          if (w3.terrain[(ty + dy) * 64 + (tx + dx)] === T_WATER) water++;
+          if (w3.terrain[(ty + dy) * MAP_W + (tx + dx)] === T_WATER) water++;
         }
       }
       if (water < 2) continue;
@@ -125,7 +167,7 @@ export function runSelftest(): void {
   let turretOk = false;
   for (let i = 0; i < w3.terrain.length && !turretOk; i++) {
     if (w3.terrain[i] !== T_RAMP) continue;
-    const rx = i % 64, ry = (i / 64) | 0;
+    const rx = i % MAP_W, ry = (i / MAP_W) | 0;
     for (let dy = -2; dy <= 2 && !turretOk; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const tx = rx + dx, ty = ry + dy;
@@ -141,8 +183,8 @@ export function runSelftest(): void {
   // 科技：立项 → 推进 → 完成 → 与法令叠乘
   w3.players[0].res.wood = 480; w3.players[0].res.food = 480; w3.players[0].res.ore = 480;
   let labSpot: { tx: number; ty: number } | null = null;
-  for (let ty = 2; ty < 62 && !labSpot; ty++) {
-    for (let tx = 2; tx < 62; tx++) {
+  for (let ty = 2; ty < MAP_H - 2 && !labSpot; ty++) {
+    for (let tx = 2; tx < MAP_W - 2; tx++) {
       if (w3.canPlace('lab', tx, ty).ok) { labSpot = { tx, ty }; break; }
     }
   }
@@ -160,22 +202,10 @@ export function runSelftest(): void {
     }
   }
 
-  // 事件：玩家弹卡结算 + AI秒决
-  w3.players[0].res.wood = 200;
-  w3.players[0].res.ore = 200;
-  w3.events.debugFire(w3, 'caravan', 0);
-  const pendingShown = !!w3.events.pending;
-  const woodBefore = w3.players[0].res.wood, oreBefore = w3.players[0].res.ore;
-  w3.events.choose(w3, 0);
-  const playerEventOk = pendingShown && !w3.events.pending
-    && w3.players[0].res.wood >= woodBefore + 99
-    && w3.players[0].res.ore <= oreBefore - 49;
-  w3.events.debugFire(w3, 'envoys', 1);
-  const aiEventOk = !w3.events.pending && w3.log.count('system', undefined, m => m.includes('蛮族使者')) >= 1;
-
   // ---- Phase4：麦田链（收→运→库→种）+ 地利 + 坦克机枪 ----
   console.log('[selftest] Phase4：麦田链全链路…');
   const w4 = new World(undefined, 'standard', false);
+  deployStartBases(w4);
   const hq4 = w4.findHq(0)!;
   let laid = 0;
   outer4: for (let dy = -6; dy <= 6; dy++) {
@@ -187,7 +217,7 @@ export function runSelftest(): void {
   const farmer2 = w4.spawnUnit('farmer', 0, hq4.x + 120, hq4.y);
   const farmerIds = [farmer1.id, farmer2.id];
   let sawMature = false, replanted = false, depositCount = 0;
-  const maxStage = new Uint8Array(64 * 64);
+  const maxStage = new Uint8Array(MAP_W * MAP_H);
   const prevCargo = new Map<number, boolean>();
   for (let s = 0; s < 60 * 160; s++) {
     simTick(w4, SIM_DT, [null, null]);
@@ -212,14 +242,14 @@ export function runSelftest(): void {
 
   // 地利：临水/相邻麦田加成（即时结算，不跑模拟）
   let bonusTile = -1, plainTile = -1;
-  for (let ty = 2; ty < 62 && bonusTile < 0; ty++) {
-    for (let tx = 2; tx < 62; tx++) {
-      const i = ty * 64 + tx;
+  for (let ty = 2; ty < MAP_H - 2 && bonusTile < 0; ty++) {
+    for (let tx = 2; tx < MAP_W - 2; tx++) {
+      const i = ty * MAP_W + tx;
       if (w4.terrain[i] !== T_GRASS || w4.farmOwner[i] !== 0) continue;
       let water = 0, farms = 0;
       for (let dy2 = -1; dy2 <= 1; dy2++) for (let dx2 = -1; dx2 <= 1; dx2++) {
         if (!dx2 && !dy2) continue;
-        const j = (ty + dy2) * 64 + tx + dx2;
+        const j = (ty + dy2) * MAP_W + tx + dx2;
         if (w4.terrain[j] === T_WATER) water++;
         if (w4.terrain[j] === T_FARM) farms++;
       }
@@ -240,6 +270,7 @@ export function runSelftest(): void {
 
   // 坦克舷侧机枪：近距离敌人应触发开火
   const w5 = new World(undefined, 'standard', false);
+  deployStartBases(w5);
   const hq5 = w5.findHq(0)!;
   w5.spawnUnit('tank', 0, hq5.x + 200, hq5.y);
   w5.spawnUnit('barbarian', 2, hq5.x + 260, hq5.y);
@@ -257,9 +288,120 @@ export function runSelftest(): void {
     if (!w5.entities.has(barb2.id) || barb2.hp < 90) hqDefOk = true;
   }
 
+  // 混合编队攻击（RW式推进）：坦克打200px外的墙，应推进到60%射程（78px）近身开火，而非远距离停车
+  const w6 = new World(undefined, 'standard', false);
+  deployStartBases(w6);
+  const hq6 = w6.findHq(0)!;
+  const tk = w6.spawnUnit('tank', 0, hq6.x - 220, hq6.y);
+  const wall = w6.spawnBuilding('wall', 2, hq6.tx + 4, hq6.ty + 1, true);
+  w6.issueAttack([tk.id], wall.id);
+  let closedIn = false;
+  for (let s = 0; s < 60 * 15; s++) {
+    simTick(w6, SIM_DT, [null, null]);
+    if (!w6.entities.has(wall.id)) break;
+    const d = Math.hypot(tk.x - wall.x, tk.y - wall.y) - wall.radius();
+    if (d <= 130 * 0.6 + 3) closedIn = true;
+  }
+  const attackAdvOk = closedIn && w6.entities.has(wall.id);
+
+  // ---- Phase5：金币·商路·纪元·奇观 ----
+  console.log('[selftest] Phase5：金币·商路·纪元·奇观…');
+  const w7 = new World(undefined, 'standard', false);
+  deployStartBases(w7);
+  const p7 = w7.players[0];
+
+  // 市场汇率：卖100木→40金；70金→买100食
+  p7.res.wood = 300;
+  const g0 = p7.gold;
+  const sellOk = w7.marketSell(0, 'wood') && p7.gold === g0 + 40 && p7.res.wood === 200;
+  p7.gold = 100; p7.res.food = 0;
+  const buyOk = w7.marketBuy(0, 'food') && p7.gold === 30 && p7.res.food === 100;
+
+  // 商路：商贸站贴着营地盖（缩短商队单程）+商队往返入账；通商=停战
+  const campSpot = [...w7.entities.values()].find(e => e.defId === 'camp');
+  let postSpot: { tx: number; ty: number } | null = null;
+  if (campSpot) {
+    for (let dy = -5; dy <= 5 && !postSpot; dy++) for (let dx = -5; dx <= 5 && !postSpot; dx++) {
+      const tx = campSpot.tx + dx, ty = campSpot.ty + dy;
+      if (w7.canPlace('tradePost', tx, ty).ok) postSpot = { tx, ty };
+    }
+  }
+  const post = postSpot ? w7.spawnBuilding('tradePost', 0, postSpot.tx, postSpot.ty, true) : null;
+  const caravanOk = !!post && w7.hireCaravan(post.id) && [...w7.entities.values()].some(e => e.defId === 'caravan');
+  let traded = false, truceOk = false;
+  for (let s = 0; s < 60 * 120; s++) {
+    simTick(w7, SIM_DT, [null, null]);
+    if (p7.gold > 0) traded = true;
+    const camp = [...w7.entities.values()].find(e => e.defId === 'camp');
+    if (camp && (camp.nTruceUntil ?? 0) > w7.time) truceOk = true;
+    if (traded && truceOk) break;
+  }
+
+  // 纪元：工业→钢铁（乘数叠乘）
+  p7.gold = 500; p7.res.wood = 480; p7.res.food = 480; p7.res.ore = 480;
+  const w7lab = w7.spawnBuilding('lab', 0, (() => {
+    for (let ty = 2; ty < MAP_H - 2; ty++) for (let tx = 2; tx < MAP_W - 2; tx++) {
+      if (w7.canPlace('lab', tx, ty).ok) return { tx, ty };
+    }
+    return { tx: 2, ty: 2 };
+  })().tx, (() => {
+    for (let ty = 2; ty < MAP_H - 2; ty++) for (let tx = 2; tx < MAP_W - 2; tx++) {
+      if (w7.canPlace('lab', tx, ty).ok) return { tx, ty };
+    }
+    return { tx: 2, ty: 2 };
+  })().ty, true);
+  void w7lab;
+  let eraOk = w7.startResearch(0, 'industrial');
+  if (eraOk) {
+    for (let s = 0; s < 60 * 45 && p7.era < 1; s++) simTick(w7, SIM_DT, [null, null]);
+    eraOk = p7.era === 1;
+  }
+  p7.gold = 900; p7.res.wood = 900; p7.res.food = 700; p7.res.ore = 500;
+  const steelOk = w7.startResearch(0, 'steel');
+  if (steelOk) {
+    for (let s = 0; s < 60 * 65 && p7.era < 2; s++) simTick(w7, SIM_DT, [null, null]);
+    eraOk = eraOk && p7.era === 2;
+  } else eraOk = false;
+
+  // 奇观：纪念碑落成→90秒加冕胜利
+  p7.gold = 600; p7.res.wood = 1400; p7.res.food = 1100; p7.res.ore = 900;
+  const w7spot = (() => {
+    for (let ty = 2; ty < MAP_H - 5; ty++) for (let tx = 30; tx < MAP_W - 6; tx++) {
+      if (w7.canPlace('monument', tx, ty).ok) return { tx, ty };
+    }
+    return null;
+  })();
+  let monumentOk = false, coronationOk = false;
+  if (w7spot) {
+    const mon = w7.spawnBuilding('monument', 0, w7spot.tx, w7spot.ty, true);
+    w7.startCoronation(0, mon.id); // 直接spawn不经过施工钩子，手动启动加冕
+    coronationOk = !!w7.coronation && w7.coronation.owner === 0;
+    for (let s = 0; s < 60 * 95 && w7.gameOver === 0; s++) simTick(w7, SIM_DT, [null, null]);
+    monumentOk = w7.gameOver === 1 && w7.lastVictory === 'coronation';
+  }
+
+  // 被拆分支：加冕中纪念碑被毁 → 中断且不计负
+  const w8 = new World(undefined, 'standard', false);
+  deployStartBases(w8);
+  const w8spot = (() => {
+    for (let ty = 2; ty < MAP_H - 5; ty++) for (let tx = 30; tx < MAP_W - 6; tx++) {
+      if (w8.canPlace('monument', tx, ty).ok) return { tx, ty };
+    }
+    return null;
+  })();
+  let brokenOk = false;
+  if (w8spot) {
+    const mon8 = w8.spawnBuilding('monument', 0, w8spot.tx, w8spot.ty, true);
+    w8.startCoronation(0, mon8.id);
+    const hadCoro = !!w8.coronation;
+    w8.removeEntity(mon8.id);
+    brokenOk = hadCoro && !w8.coronation && w8.gameOver === 0;
+  }
+
   // ---- 汇总 ----
   const checks: [string, boolean][] = [
     ['地形健全（高度0~3 + 基地连通）', terrainOk],
+    ['随机地图：高度/资源/基地连通', randomOk],
     ['无NaN污染', bad === ''],
     ['存储上限从未被突破', capViolations === 0],
     ['AI建成3+建筑（经济链成立）', aiBldgDone >= 3],
@@ -271,11 +413,16 @@ export function runSelftest(): void {
     ['法令：切换生效+冷却+乘数', edictOk],
     ['地利：农场临水/炮台扼坡道', farmOk && turretOk],
     ['科技：立项→完成→乘数叠乘', techOk],
-    ['事件：玩家弹卡结算+AI秒决', playerEventOk && aiEventOk],
     ['麦田链：铺设→收割→入库→回种', farmChainOk],
     ['麦田地利：临水/相邻加成', farmBonusOk],
     ['坦克舷侧机枪开火', tankFired],
     ['HQ防卫武装（炮+机枪）', hqDefOk],
+    ['攻击推进：坦克进到60%射程开火', attackAdvOk],
+    ['市场汇率：卖40/买70（差价防套利）', sellOk && buyOk],
+    ['商路：商队往返入账+通商停战', caravanOk && traded && truceOk],
+    ['纪元：工业→钢铁+乘数生效', eraOk && steelOk],
+    ['奇观：落成加冕胜利', monumentOk && coronationOk],
+    ['奇观被拆：加冕中断不计负', brokenOk],
   ];
 
   const realSec = ((performance.now() - t0) / 1000).toFixed(1);
@@ -283,6 +430,14 @@ export function runSelftest(): void {
   console.log(`[selftest] 日志统计:`, w.log.summary());
   console.log('[selftest] 日志尾部:');
   for (const line of w.log.tail(12)) console.log('  ' + line);
+  // 临时探针：基地车开局诊断（打到结算画面上）
+  const dbg = {
+    hq: [...w.entities.values()].some(e => e.defId === 'hq'),
+    mcv: [...w.entities.values()].filter(e => e.defId === 'mcv').length,
+    units: [...w.entities.values()].filter(e => e.kind === 'unit').map(e => e.defId).join(','),
+    time: Math.round(w.time),
+  };
+  console.log('[selftest] Phase1探针:', JSON.stringify(dbg));
   let allPass = true;
   const failed: string[] = [];
   for (const [name, ok] of checks) {
@@ -300,5 +455,6 @@ export function runSelftest(): void {
   (document.getElementById('overlay-title') as HTMLElement).className = allPass ? 'win' : 'lose';
   (document.getElementById('overlay-sub') as HTMLElement).textContent =
     `AI互殴${Math.floor(w.time / 60)}分钟 · 实体${w.entities.size} · 日志${Object.values(w.log.summary()).reduce((a, b) => a + b, 0)}条 · 实际耗时${realSec}s（详见控制台F12）`
-    + (failed.length > 0 ? ` —— 失败项：${failed.join(' / ')}` : '');
+    + (failed.length > 0 ? ` —— 失败项：${failed.join(' / ')}` : '')
+    + ` [探针 hq=${dbg.hq} mcv=${dbg.mcv} t=${dbg.time}]`;
 }

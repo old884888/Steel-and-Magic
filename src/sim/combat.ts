@@ -1,7 +1,7 @@
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { dist } from '../engine/spatialHash';
-import { FOG_SCAN_INTERVAL, HEIGHT_RANGE_BONUS, HEIGHT_DAMAGE_BONUS, DMG_MATRIX } from '../config';
+import { FOG_SCAN_INTERVAL, HEIGHT_RANGE_BONUS, HEIGHT_DAMAGE_BONUS, DMG_MATRIX, TILE } from '../config';
 import { COMPOSITE_MITIGATION } from '../data/policies';
 import type { World } from './world';
 import type { Entity } from './entity';
@@ -89,12 +89,18 @@ export function updateCombat(w: World, dt: number): void {
 
     // ---- 错峰索敌扫描 ----
     const doScan = (w.tick + e.id) % FOG_SCAN_INTERVAL === 0;
-    if (doScan) {
-      // 清理失效目标
-      if (e.order.kind === 'attack' && e.order.targetId != null) {
-        const t = w.entities.get(e.order.targetId);
-        if (!t || t.owner === e.owner) e.order = { kind: 'idle' };
-      }
+      if (doScan) {
+        // 清理失效目标
+        if (e.order.kind === 'attack' && e.order.targetId != null) {
+          const t = w.entities.get(e.order.targetId);
+          if (!t || t.owner === e.owner) {
+            // 目标阵亡：铁锈式就近转火（12格内），实在没目标才原地待命
+            const wpn = weaponOf(e);
+            const near = wpn ? nearestEnemy(w, e, TILE * 12, true, wpn.targetsAir === true) : null;
+            if (near) { e.order = { kind: 'attack', targetId: near.id }; e.engagedId = near.id; }
+            else e.order = { kind: 'idle' };
+          }
+        }
       if (e.engagedId != null) {
         const t = w.entities.get(e.engagedId);
         if (!t || t.owner === e.owner) e.engagedId = null;
@@ -143,12 +149,18 @@ export function updateCombat(w: World, dt: number): void {
           // 轰炸机：飞越目标头顶即投弹（冷却好了就投），永不停不悬停
           if (inMax && inMin) { firing = true; }
         } else if (e.order.kind === 'attack') {
-          if (inMax && inMin) { e.firingHold = true; e.path = null; firing = true; }
-          else if (inMax && !inMin) { e.firingHold = true; } // 火炮被贴脸：愣住
+          // RW式攻击：推进到60%射程（火炮=全射程）站桩，到位前边推进边开火
+          const stopAt = UNIT_DEFS[e.defId].stopToFire ? effRange : effRange * 0.6;
+          if (d <= stopAt) { e.firingHold = true; e.path = null; }
+          if (inMax && inMin) firing = true;
+          else if (inMax && !inMin) e.firingHold = true; // 贴脸盲区：愣住
         } else if (e.order.kind === 'move') {
-          if (inMax && inMin) { e.firingHold = true; firing = true; }
+          if (inMax && inMin) {
+            firing = true; // 行进射击：边走边打（全员默认）
+            if (UNIT_DEFS[e.defId].stopToFire) e.firingHold = true; // 唯一例外：自行火炮停车架炮
+          }
           else if (!inMax) e.engagedId = null;
-          else e.firingHold = true;
+          else e.firingHold = true; // minRange盲区（只有火炮有）：愣住
         } else if (e.order.kind === 'attackMove') {
           if (inMax && inMin) { e.firingHold = true; firing = true; }
         } else if (e.order.kind === 'hold') {

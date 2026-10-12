@@ -9,20 +9,23 @@ import type { Entity } from './entity';
  * 全部 owner 2；不参与经济/人口/胜负，只给地图添麻烦和肉。
  */
 
-/** 在世界创建时布置中立生态：双营地、鹿群、狼群 */
+/** 在世界创建时布置中立生态：双营地、鹿群、狼群（坐标随地图尺寸缩放） */
 export function spawnNeutrals(w: World): void {
+  const S = MAP_W / 64; // 地图尺寸倍率
   // 蛮族营地：中路两侧（离双基地都有一段距离）
-  spawnCamp(w, 44, 18);
-  spawnCamp(w, 18, 44);
+  spawnCamp(w, 44 * S, 18 * S);
+  spawnCamp(w, 18 * S, 44 * S);
   // 鹿群：靠近林区
-  spawnHerd(w, 12, 40, 'deer', 3);
-  spawnHerd(w, 50, 22, 'deer', 3);
-  spawnHerd(w, 32, 6, 'deer', 3);
-  spawnHerd(w, 32, 58, 'deer', 3);
+  spawnHerd(w, 12 * S, 40 * S, 'deer', 3);
+  spawnHerd(w, 50 * S, 22 * S, 'deer', 3);
+  spawnHerd(w, 32 * S, 6 * S, 'deer', 3);
+  spawnHerd(w, 32 * S, 58 * S, 'deer', 3);
+  spawnHerd(w, 50 * S, 50 * S, 'deer', 3);
   // 狼群：营地附近当门卫，中路再来一窝
-  spawnHerd(w, 42, 16, 'wolf', 2);
-  spawnHerd(w, 20, 46, 'wolf', 2);
-  spawnHerd(w, 36, 36, 'wolf', 2);
+  spawnHerd(w, 42 * S, 16 * S, 'wolf', 2);
+  spawnHerd(w, 20 * S, 46 * S, 'wolf', 2);
+  spawnHerd(w, 36 * S, 36 * S, 'wolf', 2);
+  spawnHerd(w, 14 * S, 14 * S, 'wolf', 2);
 }
 
 function spawnCamp(w: World, tx: number, ty: number): void {
@@ -89,8 +92,8 @@ export function updateNeutrals(w: World, dt: number): void {
       }
 
       if (e.nRaidT <= 0) {
-        // 停战期（事件卡「蛮族使者」）：掠袭暂停，稍后再问
-        if (w.time < w.barbTruceUntil) { e.nRaidT = 10; continue; }
+        // 通商停战（商队到访刷新）：贸易即纳贡，劫掠暂停
+        if ((e.nTruceUntil ?? 0) > w.time) { e.nRaidT = 10; continue; }
         e.nRaidT = 30;
         const ready = raiders.filter(r => r.order.kind === 'idle' && !isFleeing(r));
         if (ready.length >= 2) {
