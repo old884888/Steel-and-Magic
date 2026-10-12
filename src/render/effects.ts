@@ -29,17 +29,17 @@ export class EffectsRenderer {
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(a + Math.PI / 2); // Kenney贴图朝上
-      const img = this.imgs[p.kind];
+      const img = this.imgs[p.visual];
       if (this.loaded && img && img.complete && img.naturalWidth > 0) {
         // 原图12x26偏大，按弹种缩到正常子弹观感
-        const scale = p.kind === 'cannon' ? 0.7 : p.kind === 'shell' ? 0.55 : 0.45;
+        const scale = p.visual === 'cannon' ? 0.7 : p.visual === 'shell' ? 0.55 : 0.45;
         ctx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
-      } else if (p.kind === 'fire') {
+      } else if (p.visual === 'flame') {
         ctx.fillStyle = '#ff9a3c';
         ctx.beginPath(); ctx.arc(0, 0, 3 + Math.random() * 1.5, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#ffd76e';
         ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, Math.PI * 2); ctx.fill();
-      } else if (p.kind === 'missile') {
+      } else if (p.visual === 'missile') {
         ctx.strokeStyle = 'rgba(200,210,220,.5)';
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(0, 9); ctx.lineTo(0, 0); ctx.stroke();
@@ -48,9 +48,9 @@ export class EffectsRenderer {
         ctx.fillStyle = '#ff8a5e';
         ctx.beginPath(); ctx.arc(0, -4, 1.5, 0, Math.PI * 2); ctx.fill();
       } else {
-        ctx.fillStyle = p.kind === 'cannon' ? '#ff8a5e' : p.kind === 'shell' ? '#ffe28a' : '#ffd76e';
+        ctx.fillStyle = p.visual === 'cannon' ? '#ff8a5e' : p.visual === 'shell' ? '#ffe28a' : '#ffd76e';
         ctx.beginPath();
-        ctx.ellipse(0, 0, 2.5, p.kind === 'bullet' ? 5 : 4, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, 2.5, p.visual === 'bullet' ? 5 : 4, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();

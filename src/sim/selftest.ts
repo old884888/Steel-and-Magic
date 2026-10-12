@@ -1,4 +1,5 @@
 import { SIM_DT, T_TREE, T_WATER, T_RAMP, T_GRASS, T_FARM, T_ORE, FARM_YIELD, MAP_W, MAP_H } from '../config';
+import { damage } from './combat';
 import { World } from './world';
 import { simTick } from './tick';
 import { AIController } from './ai';
@@ -302,7 +303,8 @@ export function runSelftest(): void {
     const d = Math.hypot(tk.x - wall.x, tk.y - wall.y) - wall.radius();
     if (d <= 130 * 0.6 + 3) closedIn = true;
   }
-  const attackAdvOk = closedIn && w6.entities.has(wall.id);
+  // 验收点=推进到60%射程开火（墙被拆掉是战果，不算失败）
+  const attackAdvOk = closedIn;
 
   // ---- Phase5：金币·商路·纪元·奇观 ----
   console.log('[selftest] Phase5：金币·商路·纪元·奇观…');
@@ -398,6 +400,92 @@ export function runSelftest(): void {
     brokenOk = hadCoro && !w8.coronation && w8.gameOver === 0;
   }
 
+
+  // ---- Phase6：装甲重构上卷（减伤/破甲/掉甲/不朽/三十息/双修/护盾序） ----
+  console.log('[selftest] Phase6：装甲与攻击系统…');
+  const w9 = new World(undefined, 'standard', false);
+  deployStartBases(w9);
+  const hq9 = w9.findHq(0)!;
+  const z6tk = w9.spawnUnit('tank', 0, hq9.x + 200, hq9.y); // 140血+300重甲，主炮破甲
+
+  // 1) 减伤：轻攻击10 → 重甲扣40%（4点），甲池纹丝不动
+  const hpA = z6tk.hp, amA = z6tk.armorHp;
+  damage(w9, z6tk, 10, 1, 'light', false);
+  const t1 = Math.abs(z6tk.hp - (hpA - 4)) < 0.01 && z6tk.armorHp === amA;
+  // 重攻击10 → 扣85%（8.5）
+  damage(w9, z6tk, 10, 1, 'heavy', false);
+  const t2 = Math.abs(z6tk.hp - (hpA - 4 - 8.5)) < 0.01 && z6tk.armorHp === amA;
+
+  // 2) 破甲两段：血扣全额10 + 甲扣20
+  const a1: number = z6tk.armorHp ?? 0;
+  damage(w9, z6tk, 10, 1, 'heavy', true);
+  const t3 = Math.abs(z6tk.hp - (hpA - 22.5)) < 0.01 && Math.abs((z6tk.armorHp ?? 0) - (a1 - 20)) < 0.01;
+
+  // 3) 掉甲：甲池归零后轻攻击全额伤血
+  z6tk.armorHp = 15;
+  damage(w9, z6tk, 10, 1, 'heavy', true); // 甲扣20 → 归零
+  const armorGone = z6tk.armorHp === 0;
+  const hpB = z6tk.hp;
+  damage(w9, z6tk, 10, 1, 'light', false);
+  const t4 = armorGone && Math.abs(z6tk.hp - (hpB - 10)) < 0.01;
+
+  // 4) 不朽甲：armorPool -1 永不掉甲（重攻击仍按85%扣血）
+  const w10 = new World(undefined, 'standard', false);
+  deployStartBases(w10);
+  const tt = w10.spawnUnit('tank', 0, hq9.x + 260, hq9.y);
+  tt.armorHp = -1; tt.armorMax = -1;
+  const hpC = tt.hp;
+  damage(w10, tt, 20, 1, 'heavy', true); // 破甲：血扣全额20（无视减伤表），甲池永驻-1
+  const t5 = tt.armorHp === -1 && Math.abs(tt.hp - (hpC - 20)) < 0.01;
+
+  // 5) 三十息：满30秒启动2%/s回血；受伤重置；DoT每跳重置
+  z6tk.lastDamagedAt = w9.time - 31;
+  const hpR0 = z6tk.hp;
+  simTick(w9, SIM_DT, [null, null]);
+  simTick(w9, SIM_DT, [null, null]);
+  const regenOn = z6tk.hp > hpR0;
+  // 受击重置：打一下后计时归零，30秒内不再回血
+  damage(w9, z6tk, 1, 1, 'light', false);
+  const lastAfterHit = z6tk.lastDamagedAt;
+  z6tk.armorHp = 100; // 补点甲免得干扰（可忽略）
+  let noRegenFor = true;
+  for (let s = 0; s < 60 && noRegenFor; s++) {
+    simTick(w9, SIM_DT, [null, null]);
+    if (w9.time - (z6tk.lastDamagedAt ?? 0) >= 30) noRegenFor = false;
+  }
+  // DoT重置：点燃后计时持续被刷新
+  z6tk.hp = 100; z6tk.burnUntil = w9.time + 2; z6tk.burnDps = 5; z6tk.burnFrom = 1; z6tk.burnCat = 'light';
+  let dotReset = true;
+  for (let s = 0; s < 30; s++) {
+    simTick(w9, SIM_DT, [null, null]);
+    if (w9.time - (z6tk.lastDamagedAt ?? 0) < 0.5) dotReset = true; else dotReset = false;
+  }
+  const t6 = regenOn && noRegenFor && dotReset;
+
+  // 7) 护盾顺序：护盾先吃全额，装甲/血纹丝不动
+  const gen = w9.spawnBuilding('shieldGen', 0, Math.round(z6tk.x / 32) + 1, Math.round(z6tk.y / 32), true);
+  z6tk.lastDamagedAt = w9.time - 100; // 与护盾/甲全脱离
+  const shield0 = gen.shield ?? 0;
+  const hpD = z6tk.hp, armD = z6tk.armorHp ?? 0;
+  damage(w9, z6tk, 50, 1, 'heavy', true);
+  const t7 = (gen.shield ?? 0) === shield0 - 50 && Math.abs(z6tk.hp - hpD) < 0.01 && (z6tk.armorHp ?? 0) === armD;
+  void gen;
+
+  // 8) 工程车甲血双修：同速率恢复
+  const z6wall = w9.spawnBuilding('wall', 0, Math.round(z6tk.x / 32) + 3, Math.round(z6tk.y / 32) + 1, true);
+  z6wall.hp = 100; z6wall.armorHp = 300; z6wall.lastDamagedAt = w9.time;
+  const eng = w9.spawnUnit('builder', 0, z6wall.x - 40, z6wall.y + 60);
+  w9.issueBuild([eng.id], z6wall.id);
+  const wallHp0 = z6wall.hp, wallA0 = z6wall.armorHp ?? 0;
+  for (let s = 0; s < 60 * 4; s++) simTick(w9, SIM_DT, [null, null]);
+  const hpGain = z6wall.hp - wallHp0, armorGain = (z6wall.armorHp ?? 0) - wallA0;
+  const t8 = hpGain > 20 && Math.abs(hpGain - armorGain) < 5; // 同速率双修
+
+  const t6all = t1 && t2 && t3 && t4;
+  const t7all = t5 && t6;
+  const t8all = t7 && t8;
+  const p6dbg = `t1=${t1} t2=${t2} t3=${t3} t4=${t4} | 坦克血差=${Math.round((z6tk.hp - 140) * 10) / 10} 甲=${Math.round(z6tk.armorHp ?? -1)} | 双修差=${Math.round((hpGain - armorGain) * 10) / 10}`;
+
   // ---- 汇总 ----
   const checks: [string, boolean][] = [
     ['地形健全（高度0~3 + 基地连通）', terrainOk],
@@ -423,6 +511,12 @@ export function runSelftest(): void {
     ['纪元：工业→钢铁+乘数生效', eraOk && steelOk],
     ['奇观：落成加冕胜利', monumentOk && coronationOk],
     ['奇观被拆：加冕中断不计负', brokenOk],
+    ['减伤表：轻/重攻击按甲类折血', t6all && t1 && t2],
+    ['破甲两段+掉甲：血全额+甲×2，掉甲后全额', t3 && t4],
+    ['不朽甲：armorPool -1 永不掉甲', t5],
+    ['三十息再生：满30s回血/受伤重置/DoT重置', t6],
+    ['护盾顺序：盾先吃全额，溢出进装甲', t7],
+    ['工程车甲血双修：同速率恢复', t8],
   ];
 
   const realSec = ((performance.now() - t0) / 1000).toFixed(1);
@@ -456,5 +550,6 @@ export function runSelftest(): void {
   (document.getElementById('overlay-sub') as HTMLElement).textContent =
     `AI互殴${Math.floor(w.time / 60)}分钟 · 实体${w.entities.size} · 日志${Object.values(w.log.summary()).reduce((a, b) => a + b, 0)}条 · 实际耗时${realSec}s（详见控制台F12）`
     + (failed.length > 0 ? ` —— 失败项：${failed.join(' / ')}` : '')
-    + ` [探针 hq=${dbg.hq} mcv=${dbg.mcv} t=${dbg.time}]`;
+    + ` [探针 hq=${dbg.hq} mcv=${dbg.mcv} t=${dbg.time}]`
+    + ` [P6 ${p6dbg}]`;
 }

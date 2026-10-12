@@ -43,14 +43,24 @@ export const FARM_YIELD = 8;          // 单块基础产量（=农夫一麻袋�
 export const FARM_COST_WOOD = 5;      // 铺设单价（木/格）
 
 /** 伤害类型矩阵：弹种 × 装甲 → 乘数（克制博弈核心表） */
-export const DMG_MATRIX: Record<string, Record<string, number>> = {
-  bullet: { light: 1.25, heavy: 0.6 },   // 枪弹克轻甲
-  shell:  { light: 0.75, heavy: 1.25 },  // 炮弹克重甲
-  cannon: { light: 1.0, heavy: 1.0 },    // 溅射万金油
-  fire:   { light: 1.25, heavy: 0.5 },   // 火焰克轻甲/软化重甲（附燃烧）
-  missile:{ light: 1.0, heavy: 1.0 },    // 导弹通用
-  explosive: { light: 1.25, heavy: 0.9 }, // 爆炸弹克轻甲/重甲均不俗
+/** 伤害类型矩阵（v0.14 装甲重构后由减伤表取代，弹种并三类） */
+export type AttackCat = 'light' | 'heavy';
+
+/** 减伤表：[目标甲类][攻击类别] = 承伤比例。破甲列永远100%（走两段结算）——全游戏唯一克制链 */
+export const DMG_REDUCTION: Record<'light' | 'heavy', Record<AttackCat, number>> = {
+  light: { light: 0.85, heavy: 1.0 },
+  heavy: { light: 0.40, heavy: 0.85 },
 };
+
+/** 破甲倍率（全局常量，红线1：武器数据表禁止私改，想强就改单发伤害） */
+export const ARMOR_PIERCE_MULT = 2;
+
+/** 三十息再生（全阵营通用律）：脱战30秒后回血2%/s，受伤即重置；只回血不回甲 */
+export const REGEN_DELAY = 30;
+export const REGEN_RATE = 0.02;
+
+/** 弹道视觉速度（纯外观，按visual查表；武器可用speed覆盖） */
+export const VISUAL_SPEED: Record<string, number> = { bullet: 520, shell: 380, cannon: 260, missile: 240, flame: 300 };
 
 /** 空军悬停抬升与投影 */
 export const AIR_HOVER = 14;

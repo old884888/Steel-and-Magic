@@ -1,4 +1,4 @@
-import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, T_FARM, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER } from '../config';
+import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, T_FARM, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER, REGEN_DELAY } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import type { World } from '../sim/world';
@@ -393,7 +393,11 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(15, 0); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(0, 15); ctx.stroke();
       ctx.restore();
-      if (e.hp < def.hp) this.hpBar(e.x, cy - def.radius - 9, 24, e.hp / def.hp);
+      if ((e.armorMax ?? 0) > 0) this.armorBar(e.x, cy - def.radius - 14, 24, (e.armorHp ?? 0) / (e.armorMax ?? 1));
+      if (e.hp < def.hp) {
+        this.hpBar(e.x, cy - def.radius - 9, 24, e.hp / def.hp);
+        if (this.regenActive(e, def.hp)) this.regenDot(e.x - 12, cy - def.radius - 11);
+      }
     }
 
     // ---- 放置幽灵 ----
@@ -505,7 +509,14 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText(udef.name, e.x, barY - 4);
     }
-    if (e.done && (e.hp < def.hp || sel.has(e.id))) this.hpBar(e.x, e.y - e.radius() - 8 - hOff, e.radius() * 2, e.hp / def.hp);
+    if (e.done && (e.hp < def.hp || (e.armorMax ?? 0) > 0 || sel.has(e.id))) {
+      const bw = e.radius() * 2;
+      if ((e.armorMax ?? 0) > 0) {
+        this.armorBar(e.x, e.y - e.radius() - 14 - hOff, bw, (e.armorHp ?? 0) / (e.armorMax ?? 1));
+        if (this.regenActive(e, def.hp)) this.regenDot(e.x - bw / 2 - 5, e.y - e.radius() - 12 - hOff);
+      }
+      this.hpBar(e.x, e.y - e.radius() - 8 - hOff, bw, e.hp / def.hp);
+    }
     if (!e.done) this.hpBar(e.x, e.ty * TILE - 6 - hOff, def.size * TILE, e.progress, true);
   }
 
@@ -634,7 +645,11 @@ export class Renderer {
       }
       ctx.restore();
     }
-    if (e.hp < def.hp) this.hpBar(e.x, e.y - def.radius - 9 - hOff, 24, e.hp / def.hp);
+    if ((e.armorMax ?? 0) > 0) this.armorBar(e.x, e.y - def.radius - 14 - hOff, 24, (e.armorHp ?? 0) / (e.armorMax ?? 1));
+    if (e.hp < def.hp) {
+      this.hpBar(e.x, e.y - def.radius - 9 - hOff, 24, e.hp / def.hp);
+      if (this.regenActive(e, def.hp)) this.regenDot(e.x - 12, e.y - def.radius - 11 - hOff);
+    }
   }
 
   /** 选中单位/建筑的范围可视化：白色虚线视野圈 + 琥珀射程圈 + 红色最小射程圈 */
@@ -660,13 +675,28 @@ export class Renderer {
     }
   }
 
-  private hpBar(cx: number, y: number, width: number, ratio: number, amber = false): void {
+  private hpBar(cx: number, y: number, width: number, ratio: number, amber = false, color?: string): void {
     const ctx = this.ctx;
     const h = 4;
     ctx.fillStyle = COLORS.hpBarBack;
     ctx.fillRect(cx - width / 2 - 1, y - 1, width + 2, h + 2);
-    ctx.fillStyle = amber ? '#f0a63c' : ratio > 0.4 ? COLORS.hpBar : COLORS.hpBarLow;
+    ctx.fillStyle = color ?? (amber ? '#f0a63c' : ratio > 0.4 ? COLORS.hpBar : COLORS.hpBarLow);
     ctx.fillRect(cx - width / 2, y, width * Math.max(0, Math.min(1, ratio)), h);
+  }
+
+  /** 装甲池条（钢蓝，画在血条上层）+ 三十息回血呼吸灯 */
+  private armorBar(cx: number, y: number, width: number, ratio: number): void {
+    this.hpBar(cx, y, width, ratio, false, '#6fa8dc');
+  }
+
+  private regenActive(e: Entity, maxHp: number): boolean {
+    return this.world.time - (e.lastDamagedAt ?? -1e9) >= REGEN_DELAY && e.hp < maxHp;
+  }
+
+  private regenDot(x: number, y: number): void {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
+    this.ctx.fillStyle = `rgba(120,255,140,${0.35 + pulse * 0.5})`;
+    this.ctx.beginPath(); this.ctx.arc(x, y, 2.5 + pulse, 0, Math.PI * 2); this.ctx.fill();
   }
 
   private drawFog(): void {

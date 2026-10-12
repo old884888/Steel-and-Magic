@@ -60,6 +60,13 @@ export interface GunnerFields {
   mgCooldown?: number;
 }
 
+/** 装甲池（双命制外层生命）：仅破甲攻击可削减；归零后减伤表作废 */
+export interface ArmorFields {
+  armorHp?: number;         // 当前装甲池（>0有甲 / 0已掉甲 / 负数=不朽）
+  armorMax?: number;        // 装甲池上限
+  lastDamagedAt?: number;   // 上次实际掉血时刻（三十息再生计时）
+}
+
 /** 中立生物（营地/兽群）：游荡/刷兵/劫掠计时 */
 export interface CreatureFields {
   nSpawnT?: number;         // 营地刷兵倒计时
@@ -73,6 +80,7 @@ export interface BurningFields {
   burnUntil?: number;       // 燃烧截止时间
   burnDps?: number;         // 燃烧每秒伤害
   burnFrom?: number;        // 纵火者（击杀归属）
+  burnCat?: 'light' | 'heavy';  // 火源攻击类别（DoT每跳走减伤表）
 }
 
 /** AI专属运行时标记（仅敌方单位使用） */
@@ -107,6 +115,7 @@ export interface Entity extends
   FarmerFields,
   TraderFields,
   GunnerFields,
+  ArmorFields,
   CreatureFields,
   BurningFields,
   AIFields,
@@ -115,6 +124,7 @@ export interface Entity extends
 export function makeUnit(id: number, owner: number, defId: string, x: number, y: number, hp: number): Entity {
   return {
     id, owner, kind: 'unit', defId, x, y, hp,
+    armorHp: 0, armorMax: 0, lastDamagedAt: -1e9,
     angle: 0, turretAngle: 0,
     order: { kind: 'idle' }, path: null, pathIdx: 0, pathPending: false,
     cooldown: 0, engagedId: null, firingHold: false, repathTimer: 0,
@@ -133,6 +143,7 @@ export function makeBuilding(id: number, owner: number, defId: string, tx: numbe
   return {
     id, owner, kind: 'building', defId,
     x: cx, y: cy, hp: done ? hp : Math.max(1, hp * 0.1),
+    armorHp: 0, armorMax: 0, lastDamagedAt: -1e9,
     angle: 0, turretAngle: 0,
     order: { kind: 'idle' }, path: null, pathIdx: 0, pathPending: false,
     cooldown: 0, engagedId: null, firingHold: false, repathTimer: 0, scanTimer: (id % 12) / 60, stuck: 0,

@@ -16,12 +16,26 @@ export interface Order {
 }
 
 /** 武器定义（单位与防御塔共用） */
+/** 状态标签注册表（五坑位：burn已实装，其余预留解析不报错） */
+export type StatusKind = 'burn' | 'shock' | 'poison' | 'malfunction' | 'freeze';
+
+export interface StatusEffect {
+  kind: StatusKind;
+  dur: number;      // 持续秒数
+  potency: number;  // 强度（burn=每秒伤害）
+}
+
 export interface WeaponDef {
   damage: number;
   range: number;       // 世界像素
   minRange?: number;   // 最小射程（火炮类）
   cooldown: number;    // 秒
-  projectile: 'bullet' | 'shell' | 'cannon' | 'fire' | 'missile' | 'explosive';
+  cat: 'light' | 'heavy';             // 攻击类别（减伤表列）
+  pierce?: boolean;                   // 破甲标签：仅重攻击可贴；血扣全额+甲扣伤害×2；与溅射互斥
+  visual: 'bullet' | 'shell' | 'cannon' | 'missile' | 'flame';  // 弹道外观（纯视觉）
+  speed?: number;                     // 弹速覆盖（默认按visual查VISUAL_SPEED）
+  impactFire?: boolean;               // 落地生成燃烧区
+  status?: StatusEffect;              // 状态标签（burn已实装）
   splash?: number;     // 溅射半径
   targetsAir?: boolean; // 能否攻击空中单位（默认否）
   airOnly?: boolean;   // 只打空中（防空专职）
@@ -47,7 +61,8 @@ export interface UnitDef {
   canBuild?: string[];         // 可建造的建筑id列表（工程车）
   moveClass?: MoveClass;             // 移动层级（默认land；air无视地形/naval走水面）
   bomber?: boolean;                  // 轰炸机：飞越目标头顶投弹（不停火不悬停）
-  armor?: 'light' | 'heavy';         // 装甲类型（伤害矩阵乘数，默认light）
+  armor?: 'light' | 'heavy';         // 装甲类别（减伤表行键；轻/重二元锁死）
+  armorPool?: number;                // 装甲池（外层生命；0=无甲，-1=不朽；仅破甲可削）
   wild?: 'passive' | 'territorial';  // 野生动物习性（passive不索敌，territorial守家）
   bounty?: ResAmount;                // 击杀缴获（猎食/剿灭奖励）
   mg?: WeaponDef;                    // 舷侧机枪：固定双联，独立索敌/冷却，与主炮互不干扰
@@ -83,6 +98,7 @@ export interface BuildingDef {
   needOre?: boolean;           // 采矿场：必须压矿
   unique?: boolean;            // HQ类
   bounty?: ResAmount;          // 摧毁缴获（蛮族营地等）
+  armorPool?: number;          // 装甲池（外层生命；0=无甲，-1=不朽）
   shieldPool?: number;         // 护盾发生器：护盾池上限
   shieldRegen?: number;        // 护盾回充速率（脱战5秒后）
   needWater?: boolean;         // 船厂：必须临水
@@ -115,10 +131,16 @@ export interface Projectile {
   tx: number; ty: number;      // 落点（发射时锁定目标当前位置+散布）
   speed: number;
   damage: number;
+  cat: 'light' | 'heavy';      // 攻击类别（减伤表列）
+  pierce: boolean;             // 破甲：血扣全额+甲池扣伤害×2
+  impactFire: boolean;         // 落地生成燃烧区
+  ignite: boolean;             // 直击点燃（status burn）
+  burnDur: number;             // 点燃持续（秒，ignite时有效）
+  burnDps: number;             // 点燃每秒伤害（ignite时有效）
   splash: number;
   hitRadius: number;           // 命中判定半径（落点弹：落点附近有敌即伤害）
   targetsAir: boolean;         // 该弹能否伤害空中单位
-  kind: 'bullet' | 'shell' | 'cannon' | 'fire' | 'missile' | 'explosive';
+  visual: 'bullet' | 'shell' | 'cannon' | 'missile' | 'flame';  // 弹道外观（纯视觉）
   owner: number;
   aimId: number;              // 原瞄准目标（落点弹允许命中瞄准的野物）
   travel: number;              // 已飞行距离（fx用）

@@ -20,7 +20,7 @@ export function updateFireZones(w: World, dt: number): void {
       const d = dist(fz.x, fz.y, o.x, o.y) - o.radius();
       if (d <= fz.radius && o.hp > 0) {
         // 每帧微量伤害（60Hz下dps*dt极小，直接扣）
-        damage(w, o, fz.dps * dt, fz.owner);
+        damage(w, o, fz.dps * dt, fz.owner, 'heavy'); // 火区源自爆炸弹（重攻击）
       }
     }
   }

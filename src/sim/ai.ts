@@ -99,6 +99,13 @@ export class AIController {
     if (tacticOn('retreat')) applyRetreat(ctx);
     if (tacticOn('spareArtillery')) applySpareArtillery(ctx);
     const compAdj = tacticOn('counterComp') ? counterCompWeights(snap.foeComposition) : {};
+    // 反装甲配兵（克制配兵延伸）：敌重甲占比>25% 且 己方破甲<15% → 破甲单位权重×2
+    const effWeights = { ...this.cfg.weights };
+    if (snap.foeHeavyShare > 0.25 && snap.myPierceShare < 0.15) {
+      for (const id of Object.keys(UNIT_DEFS)) {
+        if (UNIT_DEFS[id].weapon?.pierce) effWeights[id] = (effWeights[id] ?? 1) * 2;
+      }
+    }
     const weightOf = (defId: string): number => (this.cfg.weights[defId] ?? 1) * (compAdj[defId] ?? 1);
 
     // ---- 生产（优先级驱动：每个生产建筑挑自己能造的最高分单位） ----
@@ -108,7 +115,7 @@ export class AIController {
       if (!def.produces || b.queue.length >= 2) continue;
       const ranked = rankProduction(
         def.produces.map(defId => ({ defId, kind: 'unit' as const, need: 1 })),
-        this.cfg.weights,
+        effWeights,
         id => this.unitNeed(snap, id),
       );
       for (const c of ranked) {

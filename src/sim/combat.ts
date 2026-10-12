@@ -1,13 +1,13 @@
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { dist } from '../engine/spatialHash';
-import { FOG_SCAN_INTERVAL, HEIGHT_RANGE_BONUS, HEIGHT_DAMAGE_BONUS, DMG_MATRIX, TILE } from '../config';
+import { FOG_SCAN_INTERVAL, HEIGHT_RANGE_BONUS, HEIGHT_DAMAGE_BONUS, DMG_REDUCTION, ARMOR_PIERCE_MULT, TILE } from '../config';
 import { COMPOSITE_MITIGATION } from '../data/policies';
 import type { World } from './world';
 import type { Entity } from './entity';
 import type { WeaponDef, Res } from '../types';
 
-const PROJ_SPEED = { bullet: 520, shell: 380, cannon: 260, fire: 300, missile: 240, explosive: 340 };
+const VISUAL_SPEED = { bullet: 520, shell: 380, cannon: 260, missile: 240, flame: 300 };
 
 function weaponOf(e: Entity): WeaponDef | undefined {
   return e.kind === 'unit' ? UNIT_DEFS[e.defId].weapon : BUILDING_DEFS[e.defId].weapon;
@@ -101,12 +101,18 @@ export function updateCombat(w: World, dt: number): void {
               x: mx, y: my,
               tx: t.x + (Math.random() - 0.5) * 2 * spread,
               ty: t.y + (Math.random() - 0.5) * 2 * spread,
-              speed: PROJ_SPEED[mg.projectile],
+              speed: mg.speed ?? VISUAL_SPEED[mg.visual],
               damage: mg.damage,
+              cat: mg.cat,
+              pierce: !!mg.pierce,
+              impactFire: false,
+              ignite: false,
+              burnDur: 0,
+              burnDps: 0,
               splash: 0,
               hitRadius: 10,
               targetsAir: mg.targetsAir === true,
-              kind: mg.projectile,
+              visual: mg.visual,
               owner: e.owner,
               aimId: t.id,
               travel: 0,
@@ -205,17 +211,23 @@ export function updateCombat(w: World, dt: number): void {
           x: mx, y: my,
           tx: t.x + (Math.random() - 0.5) * 2 * spread,
           ty: t.y + (Math.random() - 0.5) * 2 * spread,
-          speed: PROJ_SPEED[weapon.projectile],
+          speed: weapon.speed ?? VISUAL_SPEED[weapon.visual],
           damage: effDamage,
+          cat: weapon.cat,
+          pierce: !!weapon.pierce,
+          impactFire: !!weapon.impactFire,
+          ignite: weapon.status?.kind === 'burn',
+          burnDur: weapon.status?.dur ?? 0,
+          burnDps: weapon.status?.potency ?? 0,
           splash: weapon.splash ?? 0,
-          hitRadius: weapon.projectile === 'bullet' ? 10 : weapon.projectile === 'fire' ? 9 : 12,
+          hitRadius: weapon.visual === 'bullet' ? 10 : weapon.visual === 'flame' ? 9 : 12,
           targetsAir: weapon.targetsAir === true,
-          kind: weapon.projectile,
+          visual: weapon.visual,
           owner: e.owner,
           aimId: t.id,
           travel: 0,
         });
-        w.addFx(mx, my, 'muzzle', weapon.projectile === 'cannon' ? 15 : 9, 0.08, e.turretAngle);
+        w.addFx(mx, my, 'muzzle', weapon.visual === 'cannon' ? 15 : 9, 0.08, e.turretAngle);
         e.cooldown = weapon.cooldown;
       }
     }
@@ -228,24 +240,25 @@ export function updateCombat(w: World, dt: number): void {
     const d = Math.hypot(dx, dy);
     const step = p.speed * dt;
     if (d <= step) {
-      if (p.kind === 'explosive') {
-        // 特殊爆炸弹：溅射伤害 + 地面火区（持续灼烧+视觉火焰）
-        splashDamage(w, p.tx, p.ty, p.splash, p.damage, p.owner, p.targetsAir, p.kind);
+      if (p.impactFire) {
+        // 落地起火弹：溅射伤害 + 地面火区（持续灼烧+视觉火焰）
+        splashDamage(w, p.tx, p.ty, p.splash, p.damage, p.owner, p.targetsAir, p.cat);
         spawnFireZone(w, p.tx, p.ty, p.splash * 1.2, p.owner);
         w.addFx(p.tx, p.ty, 'boom', p.splash * 1.3, 0.6);
         w.addFx(p.tx, p.ty, 'mark', 0, 2.5, undefined, undefined, '#ff6a2a');
       } else if (p.splash > 0) {
-        splashDamage(w, p.tx, p.ty, p.splash, p.damage, p.owner, p.targetsAir, p.kind);
-        if (p.kind === 'fire') igniteAt(w, p.tx, p.ty, p.splash, p.owner);
+        splashDamage(w, p.tx, p.ty, p.splash, p.damage, p.owner, p.targetsAir, p.cat);
+        if (p.ignite) igniteAt(w, p.tx, p.ty, p.splash, p.owner);
         w.addFx(p.tx, p.ty, 'boom', p.splash, 0.45);
       } else {
-        const hitEnt = impactDamage(w, p.tx, p.ty, p.hitRadius, p.damage, p.owner, p.targetsAir, p.aimId, p.kind);
-        if (hitEnt && p.kind === 'fire') {
-          hitEnt.burnUntil = w.time + 4;
-          hitEnt.burnDps = Math.max(6, p.damage * 0.5);
+        const hitEnt = impactDamage(w, p.tx, p.ty, p.hitRadius, p.damage, p.owner, p.targetsAir, p.aimId, p.cat, p.pierce);
+        if (hitEnt && p.ignite) {
+          hitEnt.burnUntil = w.time + p.burnDur;
+          hitEnt.burnDps = p.burnDps;
           hitEnt.burnFrom = p.owner;
+          hitEnt.burnCat = p.cat;
         }
-        w.addFx(p.tx, p.ty, hitEnt ? 'hit' : 'hit', hitEnt ? 7 : 3, 0.18);
+        w.addFx(p.tx, p.ty, 'hit', hitEnt ? 7 : 3, 0.18);
       }
       w.projectiles.splice(i, 1);
     } else {
@@ -274,6 +287,7 @@ function spawnFireZone(w: World, x: number, y: number, radius: number, owner: nu
       o.burnUntil = w.time + 4;
       o.burnDps = 6;
       o.burnFrom = owner;
+      o.burnCat = 'heavy';
     }
   }
 }
@@ -307,7 +321,7 @@ function nearestEnemy(w: World, e: Entity, range: number, skipPassiveWild: boole
 }
 
 /** 落点直击：命中半径内最近的合法敌人（瞄准的野物允许命中） */
-function impactDamage(w: World, x: number, y: number, radius: number, dmg: number, owner: number, targetsAir: boolean, aimId: number, dmgType: string): Entity | null {
+function impactDamage(w: World, x: number, y: number, radius: number, dmg: number, owner: number, targetsAir: boolean, aimId: number, cat?: 'light' | 'heavy', pierce?: boolean): Entity | null {
   let best: Entity | null = null;
   let bestD = Infinity;
   for (const o of w.entities.values()) {
@@ -318,26 +332,26 @@ function impactDamage(w: World, x: number, y: number, radius: number, dmg: numbe
     const d = dist(x, y, o.x, o.y) - o.radius();
     if (d <= radius && d < bestD) { bestD = d; best = o; }
   }
-  if (best) { damage(w, best, dmg, owner, dmgType); return best; }
+  if (best) { damage(w, best, dmg, owner, cat, pierce); return best; }
   return null;
 }
 
-function splashDamage(w: World, x: number, y: number, radius: number, dmg: number, owner: number, targetsAir: boolean, dmgType: string): void {
+function splashDamage(w: World, x: number, y: number, radius: number, dmg: number, owner: number, targetsAir: boolean, cat?: 'light' | 'heavy'): void {
   for (const o of w.entities.values()) {
     if (o.owner === owner) continue;
     if (!targetsAir && isAir(o)) continue;
     const d = dist(x, y, o.x, o.y) - o.radius();
-    if (d <= radius) damage(w, o, dmg, owner, dmgType);
+    if (d <= radius) damage(w, o, dmg, owner, cat);
   }
 }
 
 /**
  * 伤害结算管线：护盾改道 → 伤害矩阵（弹种×装甲）→ 扣血 → 击杀赏金 → 移除
  */
-export function damage(w: World, target: Entity, amount: number, fromOwner?: number, dmgType?: string): void {
+export function damage(w: World, target: Entity, amount: number, fromOwner?: number, cat?: 'light' | 'heavy', pierce?: boolean): void {
   let remaining = amount;
 
-  // 护盾改道：范围内有友方护盾发生器且有护盾值 → 先扣盾
+  // 1) 护盾层：先吃全额伤害（shieldGen 机制不动）
   if (target.owner <= 1) {
     const gen = findShieldFor(w, target);
     if (gen && (gen.shield ?? 0) > 0) {
@@ -350,15 +364,34 @@ export function damage(w: World, target: Entity, amount: number, fromOwner?: num
   }
   if (remaining <= 0) return;
 
-  // 伤害矩阵：弹种 × 装甲
-  if (dmgType) {
-    const armor = armorOf(target);
-    remaining *= (DMG_MATRIX[dmgType]?.[armor] ?? 1);
+  // 2) 装甲管线：甲池>0 按减伤表承伤；无甲/已掉甲 全额；不朽(-1) 永久有甲
+  const pool = target.armorHp ?? 0;
+  const immortal = pool < 0;
+  if ((pool > 0 || immortal) && cat && !pierce) {
+    const armorClass = armorOf(target);
+    remaining *= DMG_REDUCTION[armorClass]?.[cat] ?? 1;
   }
-  // 复合装甲科技：目标全军受伤减免
+
+  // 3) 复合装甲科技：目标全军受伤减免
   if (target.owner <= 1 && w.players[target.owner].techs.includes('composite')) remaining *= COMPOSITE_MITIGATION;
 
   target.hp -= remaining;
+  if (remaining > 0) target.lastDamagedAt = w.time; // 三十息律：实际掉血重置再生计时
+
+  // 4) 破甲削甲池：普通攻击对甲池零影响；不朽永不掉甲；掉甲瞬间必须可感知
+  if (pierce && (pool > 0 || immortal) && !immortal) {
+    const left = Math.max(0, pool - amount * ARMOR_PIERCE_MULT);
+    if (pool > 0 && left <= 0) {
+      target.armorHp = 0;
+      w.addFx(target.x, target.y - target.radius(), 'mark', 0, 1.4, undefined, '甲碎！', '#9fd8ff');
+      for (let k = 0; k < 5; k++) {
+        w.addFx(target.x + (Math.random() - 0.5) * target.radius() * 1.6, target.y - target.radius() * 0.4 + (Math.random() - 0.5) * target.radius(), 'hit', 5, 0.45);
+      }
+      w.addLog('military', '装甲击碎——减伤作废！', fromOwner);
+    } else {
+      target.armorHp = left;
+    }
+  }
 
   // 击杀赏金：野生动物/蛮族/营地被消灭时，击杀方获得资源
   if (target.hp <= 0) {

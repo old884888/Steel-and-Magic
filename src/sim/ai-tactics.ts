@@ -23,6 +23,8 @@ export interface AISnapshot {
   wood: number; food: number; ore: number;
   gold: number;                                // 金币（纪元/买粮决策用）
   era: number;                                 // 纪元（0拓荒/1工业/2钢铁，奇观打分用）
+  myPierceShare: number;                       // 己方破甲火力占比（反装甲配兵用）
+  foeHeavyShare: number;                       // 敌方重甲单位占比
   storageCap: number;
   incomeWood: number;
   incomeFood: number;
@@ -76,6 +78,11 @@ export function takeSnapshot(w: World, owner: 0 | 1, foe: 0 | 1): AISnapshot {
     if (nearestFoe) { threatened = { building: b, foe: nearestFoe }; break; }
   }
 
+  let pierceCount = 0;
+  for (const u of army) if (UNIT_DEFS[u.defId].weapon?.pierce) pierceCount++;
+  let foeHeavyCount = 0;
+  for (const u of foeUnits) if ((UNIT_DEFS[u.defId].armor ?? 'light') === 'heavy') foeHeavyCount++;
+
   const p = w.players[owner];
   return {
     time: w.time,
@@ -83,6 +90,8 @@ export function takeSnapshot(w: World, owner: 0 | 1, foe: 0 | 1): AISnapshot {
     foeBuildings, foeUnits, foeComposition,
     wood: p.res.wood, food: p.res.food, ore: p.res.ore,
     gold: p.gold, era: p.era,
+    myPierceShare: army.length ? pierceCount / army.length : 0,
+    foeHeavyShare: foeUnits.length ? foeHeavyCount / foeUnits.length : 0,
     storageCap: p.storageCap,
     incomeWood: p.income.wood,
     incomeFood: p.income.food,

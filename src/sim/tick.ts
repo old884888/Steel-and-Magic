@@ -7,6 +7,7 @@ import { updateConstruction } from './construction';
 import { updateGather } from './gather';
 import { updateFarms } from './farm';
 import { updateTrade } from './trade';
+import { updateRegen } from './regen';
 import { updateNeutrals } from './neutral';
 import { updateFireZones } from './firezone';
 import { updateFog } from './fog';
@@ -37,5 +38,6 @@ export function simTick(w: World, dt: number, ais: (AIController | null)[]): voi
   if (w.tick % FOG_INTERVAL === 0) updateFog(w);
   if (w.tick % 30 === 0) w.recomputePop();
   if (w.tick % 300 === 0) w.recomputeAdjacency(); // 地利加成每5秒重算（完工时也会即时算）
+  updateRegen(w, dt);                             // 三十息再生：脱战30秒回血2%/s
   w.checkCoronation();                            // 奇观加冕倒计时判定
 }

@@ -47,14 +47,18 @@ export function updateConstruction(w: World, dt: number): void {
         finished.push(b);
         if (b.defId === 'monument') w.startCoronation(b.owner as 0 | 1, b.id); // 奇观落成：90秒加冕启动
       }
-    } else if (b.hp < def.hp) {
-      // 修理
-      faceToward2(e, b.x, b.y, dt);
-      b.hp = Math.min(def.hp, b.hp + 30 * w.mult(e.owner, 'build') * dt);
-      if ((w.tick & 31) === 0) w.addFx(b.x + (Math.random() - 0.5) * b.radius(), b.y - b.radius() * 0.6, 'hit', 4, 0.2);
-      if (b.hp >= def.hp) e.order = { kind: 'idle' };
     } else {
-      e.order = { kind: 'idle' };
+      // 修理（甲血双修）：结构与装甲同速率恢复（钢铁靠车间）
+      const armorPool = def.armorPool ?? 0;
+      const hpLow = b.hp < def.hp;
+      const armorLow = (b.armorHp ?? 0) < armorPool;
+      if (!hpLow && !armorLow) { e.order = { kind: 'idle' }; continue; }
+      faceToward2(e, b.x, b.y, dt);
+      const rate = 30 * w.mult(e.owner, 'build') * dt;
+      if (hpLow) b.hp = Math.min(def.hp, b.hp + rate);
+      if (armorLow) b.armorHp = Math.min(armorPool, (b.armorHp ?? 0) + rate);
+      if ((w.tick & 31) === 0) w.addFx(b.x + (Math.random() - 0.5) * b.radius(), b.y - b.radius() * 0.6, 'hit', 4, 0.2);
+      if (b.hp >= def.hp && (b.armorHp ?? 0) >= armorPool) e.order = { kind: 'idle' };
     }
   }
 

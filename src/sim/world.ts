@@ -269,6 +269,7 @@ export class World {
   spawnUnit(defId: string, owner: number, x: number, y: number): Entity {
     const def = UNIT_DEFS[defId];
     const e = makeUnit(this.nextId++, owner, defId, x, y, def.hp);
+    e.armorHp = e.armorMax = def.armorPool ?? 0;
     this.entities.set(e.id, e);
     return e;
   }
@@ -276,6 +277,7 @@ export class World {
   spawnBuilding(defId: string, owner: number, tx: number, ty: number, done: boolean): Entity {
     const def = BUILDING_DEFS[defId];
     const e = makeBuilding(this.nextId++, owner, defId, tx, ty, def.hp, def.size, done);
+    e.armorHp = e.armorMax = def.armorPool ?? 0;
     this.entities.set(e.id, e);
     for (let dy = 0; dy < def.size; dy++) {
       for (let dx = 0; dx < def.size; dx++) {
