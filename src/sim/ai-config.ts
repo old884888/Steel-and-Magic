@@ -117,6 +117,7 @@ export const KINGDOM_RANK_WEIGHTS: Record<PersonalityId, Record<string, number>>
 /** 建筑目标数量基准（×性格targetMul = 实际上限） */
 export const BASE_BUILD_TARGETS: Record<string, number> = {
   builder: 2, farm: 7, lumber: 2, mine: 3, storehouse: 4, barracks: 2, factory: 2, turret: 2, lab: 1, tradePost: 2, monument: 1, hq: 1,
+  house: 6, waterStation: 2, clinic: 1,
   serf: 2, militia: 10, spearman: 6, lifeTree: 1, orchard: 7, lumberShed: 2, silverMine: 3, granary: 4, sageTower: 1, warHall: 2,
 };
 

@@ -6,13 +6,35 @@ import type { World } from './world';
 import type { Entity } from './entity';
 
 /**
- * 建造系统：工程车施工/修理 + 建筑生产队列出兵
+ * 建造系统：建造车施工/修理（v0.18 取料表演：放置扣款→取料→施工）+ 建筑生产队列出兵
  */
 export function updateConstruction(w: World, dt: number): void {
   const finished: Entity[] = [];
 
   for (const e of w.entities.values()) {
     if (e.kind !== 'unit') continue;
+
+    // ---- 取料表演（仅建造车）：去最近仓库装料（全额扣款已付，纯物流看得见） ----
+    if (e.gatherState === 'toDepot' && UNIT_DEFS[e.defId].canBuild) {
+      const site = w.entities.get(e.resTile);
+      if (!site || site.kind !== 'building' || site.done || site.owner !== e.owner) {
+        e.gatherState = null;
+        e.order = { kind: 'idle' };
+        continue;
+      }
+      if (e.order.kind === 'move') continue; // 赶路交给movement（到场后order被清为idle）
+      // 已到场：装料表演
+      e.jobT = (e.jobT ?? 0) + dt;
+      if ((w.tick & 15) === 0) w.addFx(e.x + 6, e.y - 6, 'hit', 5, 0.2);
+      if (e.jobT >= 0.8) {
+        e.jobT = 0;
+        e.gatherState = null;
+        e.order = { kind: 'build', targetId: site.id };
+        e.path = null; e.pathPending = false;
+      }
+      continue;
+    }
+
     if (e.order.kind !== 'build' || e.order.targetId == null) continue;
     const b = w.entities.get(e.order.targetId);
     if (!b || b.kind !== 'building' || b.owner !== e.owner) { e.order = { kind: 'idle' }; continue; }
@@ -132,23 +154,21 @@ function faceToward2(e: Entity, tx: number, ty: number, dt: number): void {
   e.angle += d * Math.min(1, dt * 12);
 }
 
-/** 排队生产（UI/AI共用）：检查资源与人口 */
+/** 排队生产（UI/AI共用）：检查资源与居民乘员（兵籍单行道：入伍即吃居民） */
 export function tryEnqueue(w: World, building: Entity, unitId: string): boolean {
   const def = UNIT_DEFS[unitId];
   if (building.owner > 1) return false;
   const p = w.players[building.owner];
   if (!def || building.queue.length >= 5) return false;
-  if (p.pop + countQueued(w, building.owner) >= p.popCap) return false;
   if (!w.canAfford(building.owner, def.cost)) return false;
+  // 乘员征召：训练消耗居民（排队即征召；队列无退款——编练严肃性）
+  const crew = def.crew ?? 0;
+  if (crew > 0 && p.residents < crew) return false;
   w.payCost(building.owner, def.cost);
+  if (crew > 0) {
+    p.residents -= crew;
+    w.addLog('military', `征召居民入伍：${def.name}（兵籍单行道，阵亡即减员）`, building.owner, 'crew:' + building.owner, 15);
+  }
   building.queue.push({ unitId, remaining: def.buildTime });
   return true;
-}
-
-function countQueued(w: World, owner: number): number {
-  let n = 0;
-  for (const e of w.entities.values()) {
-    if (e.kind === 'building' && e.owner === owner) n += e.queue.length;
-  }
-  return n;
 }

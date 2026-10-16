@@ -3,40 +3,39 @@ import type { UnitDef } from '../types';
 /** 兵种定义表 —— 钢铁联邦（数值平衡改这里） */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   builder: {
-    id: 'builder', name: '工程车', aiPriority: 60, aiRole: 'support', armor: 'light', desc: '多功能工程平台：建造/修理建筑，右键树木矿脉可采伐（载货10自动回仓）',
+    id: 'builder', name: '建造车', aiPriority: 60, aiRole: 'support', armor: 'light', desc: '纯建造/修理平台：放置建筑全额扣款后，去最近仓库取料再回工地施工（取料表演）。采集已退役——资源靠居民岗位',
     hp: 85, armorPool: 15, speed: 70, radius: 10, vision: 6,
-    cost: { wood: 60, food: 30 }, buildTime: 8, producedBy: 'hq',
-    canBuild: ['farm', 'lumber', 'mine', 'storehouse', 'lab', 'barracks', 'factory', 'turret', 'aaTurret', 'artTurret', 'shieldGen', 'wall', 'shipyard', 'tradePost', 'monument'],
-    gather: { rate: 2.5, capacity: 10 },   // 人工采集：2.5/秒，载货10（对比自动机低效但灵活）
+    cost: { wood: 60, food: 30 }, buildTime: 8, producedBy: 'hq', crew: 0,
+    canBuild: ['house', 'farm', 'lumber', 'mine', 'storehouse', 'waterStation', 'clinic', 'bath', 'lab', 'barracks', 'factory', 'turret', 'aaTurret', 'artTurret', 'shieldGen', 'wall', 'shipyard', 'tradePost', 'monument'],
+  },
+  resident: {
+    id: 'resident', name: '居民', aiPriority: 0, aiRole: 'economy', armor: 'light', desc: '国家的骨髓：待业时住民居，受雇后在岗位劳作。手无寸铁——袭击者屠民比拆塔更疼',
+    hp: 40, speed: 75, radius: 6, vision: 5,
+    cost: {}, buildTime: 0, producedBy: '', crew: 0, resident: true,
   },
   infantry: {
     id: 'infantry', name: '动员步兵', aiPriority: 55, aiRole: 'combat', armor: 'light', desc: '廉价机枪手：射速快、射程短，克制轻甲海，怕碾压与溅射',
+    crew: 1,
     hp: 60, armorPool: 25, speed: 55, radius: 7, vision: 6,
     cost: { food: 50, ore: 10 }, buildTime: 5, producedBy: 'barracks',
     weapon: { damage: 6, range: 90, cooldown: 0.7, cat: 'light', visual: 'bullet', targetsAir: true }, // 步枪可对空
   },
-  farmer: {
-    id: 'farmer', name: '农夫', aiPriority: 52, aiRole: 'economy', armor: 'light', pop: 0.5,
-    desc: '田间劳作者：收割成熟麦田扛回仓库入库，再回头补种。手无寸铁，记得派兵保护',
-    hp: 50, speed: 70, radius: 7, vision: 5,
-    cost: { food: 20, wood: 10 }, buildTime: 4, producedBy: 'hq',
-  },
   mcv: {
-    id: 'mcv', name: '基地车', aiPriority: 90, aiRole: 'support', armor: 'heavy', pop: 2,
+    id: 'mcv', name: '基地车', aiPriority: 90, aiRole: 'support', armor: 'heavy', crew: 0,
     desc: '移动指挥部：选中后点"展开基地"变身指挥基地（可先侦察再落脚）。血厚车沉，丢了它且没有基地=战败',
     hp: 400, armorPool: 500, speed: 45, radius: 14, vision: 7,
     cost: { wood: 200, ore: 200 }, buildTime: 30, producedBy: 'hq', deploysInto: 'hq', faction: 'steel',
   },
   serf: {
-    id: 'serf', name: '农奴', aiPriority: 60, aiRole: 'support', armor: 'light', faction: 'kingdom',
-    desc: '王国的双手：采集/建造数值与工程车完全一致（经济同规），修理只回血（王国无修甲）',
+    id: 'serf', name: '建造车', aiPriority: 60, aiRole: 'support', armor: 'light', faction: 'kingdom',
+    desc: '王国的建造车（藤木结构，曲线车身）：纯建造/修理，修理只回血（王国无修甲）。采集已退役——资源靠居民岗位',
     hp: 90, armorPool: 30, speed: 70, radius: 10, vision: 6,
-    cost: { food: 15, wood: 10 }, buildTime: 5, producedBy: 'lifeTree',
-    canBuild: ['orchard', 'lumberShed', 'silverMine', 'granary', 'sageTower', 'warHall', 'magicWorkshop', 'tradePost', 'thornTower', 'windTower', 'vineMortar', 'thornWall', 'wardStone', 'worldSapling'],
-    gather: { rate: 2.5, capacity: 10 },
+    cost: { food: 15, wood: 10 }, buildTime: 5, producedBy: 'lifeTree', crew: 0,
+    canBuild: ['house', 'orchard', 'lumberShed', 'silverMine', 'granary', 'waterStation', 'clinic', 'bath', 'sageTower', 'warHall', 'magicWorkshop', 'tradePost', 'thornTower', 'windTower', 'vineMortar', 'thornWall', 'wardStone', 'worldSapling'],
   },
   militia: {
     id: 'militia', name: '民兵', aiPriority: 55, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '王国的海量前线：便宜量大，海起来才有用，怕一切溅射与机动',
     hp: 60, armorPool: 20, speed: 60, radius: 7, vision: 6,
     cost: { food: 35 }, buildTime: 4, producedBy: 'warHall',
@@ -44,6 +43,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   spearman: {
     id: 'spearman', name: '长枪兵', aiPriority: 60, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '投矛手：王国低门槛的重攻击+防空基层，反装甲与反空军的两栖兵',
     hp: 75, armorPool: 25, speed: 55, radius: 8, vision: 6,
     cost: { food: 45, wood: 10 }, buildTime: 6, producedBy: 'warHall',
@@ -57,6 +57,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   tank: {
     id: 'tank', name: '主战坦克', aiPriority: 72, aiRole: 'combat', armor: 'heavy', desc: '装甲主力：血厚炮猛，主炮之外还有左右舷侧机枪（射步兵弹，独立开火），造价偏高',
+    crew: 1,
     hp: 140, armorPool: 300, speed: 60, radius: 11, vision: 7,
     cost: { ore: 70, food: 15 }, buildTime: 10, producedBy: 'factory',
     weapon: { damage: 22, range: 130, cooldown: 1.4, cat: 'heavy', pierce: true, visual: 'shell', speed: 380 },
@@ -64,6 +65,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   artillery: {
     id: 'artillery', name: '自行火炮', aiPriority: 66, aiRole: 'combat', armor: 'light', stopToFire: true, desc: '超远程榴弹炮：范围溅射拆家利器，停车架炮开火（唯一不能边走边打），皮脆且被贴脸无法还击，需要护卫',
+    crew: 1,
     hp: 90, armorPool: 80, speed: 40, radius: 10, vision: 9,
     cost: { ore: 90, wood: 40 }, buildTime: 14, producedBy: 'factory',
     weapon: { damage: 40, range: 215, minRange: 60, cooldown: 3.2, cat: 'heavy', visual: 'cannon', speed: 260, impactFire: true, splash: 28 },
@@ -77,6 +79,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   helicopter: {
     id: 'helicopter', name: '武装直升机', desc: '空中速射平台：无视地形全图机动，克制地面装甲与经济，但怕步枪和哨戒炮',
+    crew: 1,
     hp: 120, armorPool: 60, speed: 100, radius: 10, vision: 8,
     cost: { ore: 120, food: 60 }, buildTime: 12, producedBy: 'factory', aiPriority: 68, aiRole: 'combat',
     moveClass: 'air', armor: 'light',
@@ -84,18 +87,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   flamethrower: {
     id: 'flamethrower', name: '喷火兵', desc: '近距离纵火专家：火焰点燃目标持续灼烧（每秒灼烧），克步兵与建筑，被远程放风筝是死法',
+    crew: 1,
     hp: 70, armorPool: 20, speed: 60, radius: 8, vision: 5,
     cost: { food: 60, ore: 20 }, buildTime: 6, producedBy: 'barracks', aiPriority: 58, aiRole: 'combat', armor: 'light',
     weapon: { damage: 12, range: 70, cooldown: 0.5, cat: 'light', visual: 'flame', speed: 300, status: { kind: 'burn', dur: 4, potency: 6 }, spread: 8 },
   },
   mech: {
     id: 'mech', name: '步战机甲', desc: '四足程序化机甲：生态位顶峰——厚甲重炮，跨越高地如履平地（视觉），造价昂贵',
+    crew: 1,
     hp: 240, armorPool: 500, speed: 45, radius: 18, vision: 8,
     cost: { ore: 220, food: 80 }, buildTime: 22, producedBy: 'factory', aiPriority: 75, aiRole: 'combat', armor: 'heavy',
     weapon: { damage: 42, range: 150, cooldown: 2.2, cat: 'heavy', pierce: true, visual: 'cannon', speed: 260, splash: 26 },
   },
   bomber: {
     id: 'bomber', name: '轰炸机', desc: '飞越目标头顶投掷航弹（范围溅射），无对空能力，防空火力是它的天敌',
+    crew: 1,
     hp: 100, armorPool: 80, speed: 110, radius: 11, vision: 8,
     cost: { ore: 150, food: 100 }, buildTime: 14, producedBy: 'factory', aiPriority: 64, aiRole: 'combat', armor: 'light',
     moveClass: 'air', bomber: true,
@@ -103,6 +109,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   missileShip: {
     id: 'missileShip', name: '导弹舰', desc: '远程水面导弹平台：射程220压制沿岸，皮薄怕近身',
+    crew: 1,
     hp: 220, armorPool: 40, speed: 65, radius: 12, vision: 8,
     cost: { wood: 120, ore: 180 }, buildTime: 20, producedBy: 'shipyard', aiPriority: 62, aiRole: 'combat', armor: 'light',
     moveClass: 'naval',
@@ -110,6 +117,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   battleship: {
     id: 'battleship', name: '战列舰', desc: '海上的移动要塞：重甲重炮（射程200），造价昂贵，舰队核心',
+    crew: 1,
     hp: 600, armorPool: 500, speed: 50, radius: 16, vision: 9,
     cost: { wood: 250, ore: 300 }, buildTime: 30, producedBy: 'shipyard', aiPriority: 70, aiRole: 'combat', armor: 'heavy',
     moveClass: 'naval',
@@ -122,21 +130,22 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     cost: { food: 30 }, buildTime: 0, producedBy: 'tradePost',
   },
   deer: {
-    id: 'deer', name: '鹿', desc: '温顺的野生动物：受惊会逃跑，猎杀可获得食物',
+    id: 'deer', name: '鹿', desc: '警觉的野生动物：被靠近会驻足警戒，太近或受伤就掉头狂奔（可绕后驱赶），猎杀可得食物——尸体份额会腐烂，手要快',
     hp: 40, speed: 85, radius: 7, vision: 5,
     cost: {}, buildTime: 0, producedBy: '', aiRole: 'economy',
     wild: 'passive', bounty: { food: 40 },
   },
   wolf: {
-    id: 'wolf', name: '狼', desc: '领地意识极强的野兽：窝边三格内谁敢靠近就咬谁，猎杀有奖励',
+    id: 'wolf', name: '狼', desc: '领地意识极强的野兽：一只叫全窝上，追击离家域8格自动折返（防风筝）；真近战撕咬',
     hp: 60, armorPool: 10, speed: 70, radius: 8, vision: 6,
     cost: {}, buildTime: 0, producedBy: '', aiRole: 'combat',
     wild: 'territorial',
-    weapon: { damage: 10, range: 90, cooldown: 1.0, cat: 'light', visual: 'bullet' },
+    weapon: { damage: 10, range: 24, cooldown: 1.0, cat: 'light', visual: 'bullet', melee: true },
     bounty: { food: 25 },
   },
   magicChariot: {
     id: 'magicChariot', name: '魔导战车', aiPriority: 70, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '王国的机动装甲：比联邦坦克快两成便宜一成五，但轻甲怕机枪弹幕',
     hp: 160, armorPool: 60, speed: 72, radius: 11, vision: 7,
     cost: { wood: 120, ore: 40 }, buildTime: 12, producedBy: 'magicWorkshop',
@@ -144,6 +153,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   mage: {
     id: 'mage', name: '魔法师', aiPriority: 62, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '范围压制：边走边放奥术弹（无需停车架炮），脆皮要人保',
     hp: 65, armorPool: 15, speed: 55, radius: 8, vision: 8,
     cost: { food: 60, ore: 30 }, buildTime: 9, producedBy: 'warHall',
@@ -151,6 +161,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   ballista: {
     id: 'ballista', name: '弩炮', aiPriority: 66, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '王国的破甲独苗：血扣全额+甲扣双倍，可对空。脆皮贵重物，需要护卫',
     hp: 90, armorPool: 30, speed: 40, radius: 10, vision: 8,
     cost: { wood: 100, ore: 50 }, buildTime: 12, producedBy: 'warHall',
@@ -179,6 +190,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   cyclops: {
     id: 'cyclops', name: '独眼巨人', aiPriority: 64, aiRole: 'combat', armor: 'light', faction: 'kingdom',
+    crew: 1,
     desc: '独眼震爆：近战身板+比近战远一线的重踏，地面震爆范围大（只对地）',
     hp: 200, armorPool: 50, speed: 50, radius: 13, vision: 7,
     cost: { food: 120, wood: 60 }, buildTime: 14, producedBy: 'magicWorkshop',
@@ -186,6 +198,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   gunboat: {
     id: 'gunboat', name: '炮艇', desc: '近海霸主：水面机动重炮平台，轰击沿岸目标，上岸的地面部队是它的盘中餐',
+    crew: 1,
     hp: 170, armorPool: 30, speed: 75, radius: 12, vision: 7,
     cost: { wood: 100, ore: 100 }, buildTime: 15, producedBy: 'shipyard', aiPriority: 68, aiRole: 'combat',
     moveClass: 'naval', armor: 'heavy',

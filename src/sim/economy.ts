@@ -1,16 +1,18 @@
 import { BUILDING_DEFS } from '../data/buildings';
-import { TILE, MAP_W, MAP_H, T_GRASS, T_TREE, STORAGE_BASE, STORAGE_PER_STOREHOUSE } from '../config';
+import { TILE, MAP_W, MAP_H, T_GRASS, T_TREE, STORAGE_BASE, STORAGE_PER_STOREHOUSE, HQ_LABOR_RATE, HQ_LABOR_RANGE } from '../config';
 import { LOGISTICS_STORAGE, DEEP_STORAGE_BONUS } from '../data/policies';
+import { dist } from '../engine/spatialHash';
+import { jobRes } from './pop';
 import type { World } from './world';
 import type { Entity } from './entity';
 import type { Res } from '../types';
 
 /**
- * 经济系统：
+ * 经济系统（v0.18 居民与家园重构后）：
  * - 全资源共用存储上限（HQ基础 + 仓库加成），一切入账经 world.addRes 钳制
- * - 自动机（伐木站/采矿场）：开采进内部缓冲仓，缓冲仓按转运速率入库；满仓停机
- * - 农场/HQ：直接入库（同样受上限）
- * - 树木/矿脉耗竭后变草地
+ * - 岗位建筑产出先落小缓冲；转运靠 仓库搬运工（物理扛运，pop.ts）+ 帝国中心劳役班（半径内慢速漏斗，保底物流）
+ * - HQ 保底产出直接入库；树木/矿脉耗竭后变草地
+ * 自动机（runExtractor）已随双轨采集退役。
  */
 export function updateEconomy(w: World, dt: number): void {
   const income = w.players.map(() => ({ wood: 0, food: 0, ore: 0 }));
@@ -30,29 +32,32 @@ export function updateEconomy(w: World, dt: number): void {
       }
     }
 
-    if (!def.income) continue;
+    if (!def.income || e.owner > 1) continue;
 
-    // 采集乘数：法令/科技 × 地利加成
-    const gm = w.mult(e.owner, 'gather')
-      * (e.defId === 'lumber' || e.defId === 'mine' || e.defId === 'farm' ? (e.adjBonus ?? 1) : 1);
-
+    // HQ/生命古树保底产出：直接入库（受上限钳制）
+    const gm = w.mult(e.owner, 'gather');
     let active = true;
-    if (e.defId === 'lumber') active = runExtractor(w, e, 'wood', (def.income.wood ?? 0) * gm, def.bufferCap ?? 30, dt);
-    else if (e.defId === 'mine') active = runExtractor(w, e, 'ore', (def.income.ore ?? 0) * gm, def.bufferCap ?? 40, dt);
-    else if (e.owner <= 1) {
-      // 农场/HQ 直接入库
-      for (const [res, rate] of Object.entries(def.income) as [Res, number][]) {
-        const added = w.addRes(e.owner, res, rate * gm * dt);
-        if (added <= 0) active = false;
-        income[e.owner][res] += rate * gm;
-      }
+    for (const [res, rate] of Object.entries(def.income) as [Res, number][]) {
+      const added = w.addRes(e.owner, res, rate * gm * dt);
+      if (added <= 0) active = false;
+      income[e.owner][res] += rate * gm;
     }
+    void active;
+  }
 
-    if (active) {
-      const inc = income[e.owner];
-      inc.wood += (def.income.wood ?? 0) * gm;
-      inc.food += (def.income.food ?? 0) * gm;
-      inc.ore += (def.income.ore ?? 0) * gm;
+  // ---- 帝国中心劳役班：半径内岗位建筑缓冲漏斗入库（无搬运工时的保底物流，1.5/秒） ----
+  for (const e of w.entities.values()) {
+    if (e.kind !== 'building' || !e.done || e.owner > 1) continue;
+    if (!BUILDING_DEFS[e.defId].isMain) continue;
+    for (const o of w.entities.values()) {
+      if (o.kind !== 'building' || !o.done || o.owner !== e.owner || o.buffer <= 0) continue;
+      const jobs = BUILDING_DEFS[o.defId].jobs;
+      if (!jobs || jobs.bufferCap <= 0) continue;
+      if (dist(o.x, o.y, e.x, e.y) > HQ_LABOR_RANGE * TILE) continue;
+      const drain = Math.min(o.buffer, HQ_LABOR_RATE * dt);
+      const added = w.addRes(e.owner, jobRes(jobs.kind), drain);
+      o.buffer -= added;
+      if (added > 0) o.bufferStalled = false;
     }
   }
 
@@ -70,55 +75,7 @@ export function updateEconomy(w: World, dt: number): void {
   }
 }
 
-/**
- * 自动机运转：资源格 →(开采进缓冲仓)→ 缓冲仓 →(转运入库)
- * 满仓（库存到上限且缓冲仓满）时停机保息，资源格不白耗
- */
-function runExtractor(w: World, e: Entity, res: 'wood' | 'ore', rate: number, bufferCap: number, dt: number): boolean {
-  // 1) 缓冲仓 → 库存（转运速率 8/秒，受上限钳制）
-  if (e.buffer > 0) {
-    const moved = w.addRes(e.owner, res, Math.min(e.buffer, 8 * dt));
-    e.buffer -= moved;
-  }
-  e.bufferStalled = e.buffer >= bufferCap - 0.01 && w.players[e.owner].res[res] >= w.players[e.owner].storageCap - 0.01;
-  if (e.bufferStalled) return false; // 满仓停机
-
-  // 2) 资源格 → 缓冲仓（开采）
-  if (e.linkedTile < 0 || !hasResourceAt(w, e, res)) {
-    e.linkedTile = res === 'wood' ? findTreeNear(w, e) : w.pickOreTile(e.tx, e.ty, BUILDING_DEFS[e.defId].size);
-    if (e.linkedTile < 0) return false;
-  }
-  const take = Math.min(rate * dt, bufferCap - e.buffer);
-  if (take <= 0) return true;
-  if (res === 'wood') {
-    w.treeWood[e.linkedTile] -= take;
-    if (w.treeWood[e.linkedTile] <= 0) exhaustTile(w, e, '树林');
-  } else {
-    w.oreLeft[e.linkedTile] -= take;
-    if (w.oreLeft[e.linkedTile] <= 0) exhaustTile(w, e, '矿脉');
-  }
-  e.buffer += take;
-  return true;
-}
-
-function hasResourceAt(w: World, e: Entity, res: 'wood' | 'ore'): boolean {
-  if (e.linkedTile < 0) return false;
-  return res === 'wood'
-    ? w.terrain[e.linkedTile] === T_TREE && w.treeWood[e.linkedTile] > 0
-    : w.oreLeft[e.linkedTile] > 0;
-}
-
-function exhaustTile(w: World, e: Entity, name: string): void {
-  w.terrain[e.linkedTile] = T_GRASS;
-  w.treeWood[e.linkedTile] = 0;
-  w.oreLeft[e.linkedTile] = 0;
-  w.walkable[e.linkedTile] = 1;
-  w.dirtyTiles.add(e.linkedTile);
-  w.addLog('econ', `${name}被开采殆尽`, e.owner);
-  e.linkedTile = -1;
-}
-
-/** 找建筑周围4格内最近的树格（供伐木站与人工砍树共用） */
+/** 找建筑周围radius格内最近的树格（供伐木场选点校验等共用） */
 export function findTreeNear(w: World, e: { x: number; y: number }, radius = 4): number {
   const tx = Math.floor(e.x / TILE), ty = Math.floor(e.y / TILE);
   let best = -1, bestD = Infinity;

@@ -37,8 +37,10 @@ export class Input {
 
   // 边缘滚屏状态：仅鼠标且光标在画布上时生效（触屏/悬停HUD/离开窗口不触发）
   private static readonly EDGE_ZONE = 24;   // 贴边热区宽度（像素）
+  private static readonly EDGE_DWELL = 350; // 贴边驻留时长（毫秒）：路过擦边不惊动镜头
   private cursorOnCanvas = false;
   private outsideWindow = true;             // 初始未见过光标，别拿(0,0)当贴边
+  private edgeZoneSince = -1;               // 进入热区的时刻（-1=不在热区）
 
   // 框选框当前状态（渲染层读取）
   dragBox: { ax: number; ay: number; bx: number; by: number } | null = null;
@@ -96,12 +98,19 @@ export class Input {
 
   /** 每帧取屏幕边缘滚屏方向：光标贴边热区即等同按方向键（框选拖拽中同样生效） */
   edgePanAxis(): Vec {
-    if (!this.cursorOnCanvas || this.outsideWindow) return { x: 0, y: 0 };
+    if (!this.cursorOnCanvas || this.outsideWindow) { this.edgeZoneSince = -1; return { x: 0, y: 0 }; }
+    // 点击进行中冻结贴边滚屏：相机在按下→抬起之间漂移会吃掉点击精度（小屏重灾区）
+    if (this.downPos && !this.dragging) { this.edgeZoneSince = -1; return { x: 0, y: 0 }; }
     const z = Input.EDGE_ZONE;
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     let dx = 0, dy = 0;
     if (this.cur.x <= z) dx = -1; else if (this.cur.x >= w - z) dx = 1;
     if (this.cur.y <= z) dy = -1; else if (this.cur.y >= h - z) dy = 1;
+    if (dx === 0 && dy === 0) { this.edgeZoneSince = -1; return { x: 0, y: 0 }; }
+    // 驻留门槛：光标在热区里待满 EDGE_DWELL 毫秒才开滚（瞄准/路过零打扰）
+    const now = performance.now();
+    if (this.edgeZoneSince < 0) { this.edgeZoneSince = now; return { x: 0, y: 0 }; }
+    if (now - this.edgeZoneSince < Input.EDGE_DWELL) return { x: 0, y: 0 };
     return { x: dx, y: dy };
   }
 

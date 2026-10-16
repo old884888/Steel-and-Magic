@@ -11,7 +11,8 @@ export function findPath(
   sx: number, sy: number,
   tx: number, ty: number,
 ): { x: number; y: number }[] | null {
-  if (sx === tx && sy === ty) return [];
+  // 同格：返回单点路标，让单位走完最后几像素（空数组会被movement当成永久卡死）
+  if (sx === tx && sy === ty) return [{ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE }];
   if (!inBounds(tx, ty) || !walkable[ty * MAP_W + tx]) return null;
 
   const size = MAP_W * MAP_H;

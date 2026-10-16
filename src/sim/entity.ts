@@ -1,4 +1,4 @@
-import type { Order } from '../types';
+import type { Order, JobKind } from '../types';
 
 export interface PathPoint { x: number; y: number }
 export interface QueueItem { unitId: string; remaining: number }
@@ -33,7 +33,7 @@ export interface UnitFields {
 
 /** 职业：工程车采集（帝国时代式） */
 export interface GathererFields {
-  cargo: { res: 'wood' | 'ore' | 'wheat'; amt: number } | null;
+  cargo: { res: 'wood' | 'ore' | 'wheat' | 'food'; amt: number } | null;
   gatherState: 'toRes' | 'gathering' | 'toDepot' | 'deposit' | null;
   resTile: number;          // 目标资源格
   resExhausted: boolean;    // 资源枯竭标记：卸完货就地待命
@@ -89,6 +89,22 @@ export interface AIFields {
   aiSpareUntil?: number;    // 保炮车后撤锁定期
 }
 
+/** 职业：居民（v0.18 岗位劳动：伐木工/矿工/搬运工/农庄农夫） */
+export interface ResidentFields {
+  jobKind?: JobKind;        // 岗位类型（与雇主建筑jobs.kind匹配）
+  jobBuilding?: number;     // 雇主建筑id（0=无）
+}
+
+/** 建造车取料表演（v0.18）：本单材料已取 */
+export interface BuilderFields {
+  fetchDone?: boolean;      // issueBuild 时重置
+}
+
+/** 建筑：岗位与小缓冲（v0.18） */
+export interface JobHostFields {
+  staffIds?: number[];      // 在岗居民实体id表（workers数=长度；建筑被毁=全员殉职）
+}
+
 /** 建筑字段 */
 export interface BuildingFields {
   tx: number; ty: number;   // 左上角格坐标
@@ -113,13 +129,16 @@ export interface Entity extends
   UnitFields,
   GathererFields,
   FarmerFields,
+  ResidentFields,
+  BuilderFields,
   TraderFields,
   GunnerFields,
   ArmorFields,
   CreatureFields,
   BurningFields,
   AIFields,
-  BuildingFields {}
+  BuildingFields,
+  JobHostFields {}
 
 export function makeUnit(id: number, owner: number, defId: string, x: number, y: number, hp: number): Entity {
   return {

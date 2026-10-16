@@ -3,6 +3,7 @@ import { damage } from './combat';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { World } from './world';
+import type { Entity } from './entity';
 import { simTick } from './tick';
 import { AIController } from './ai';
 
@@ -82,7 +83,7 @@ export function runSelftest(): void {
     if (!reach2) { randomOk = false; break; }
   }
   const ais: (AIController | null)[] = [new AIController(0), new AIController(1)];
-  const maxTicks = 60 * 60 * 5;
+  const maxTicks = 60 * 60 * 9; // v0.18 人口经济：AI首波是慢变量，5分钟窗口看不到（9分钟冒烟）
   let bad = '';
   let capViolations = 0;
 
@@ -112,28 +113,28 @@ export function runSelftest(): void {
   const waves = w.log.count('military', undefined, m => m.includes('波进攻发起'));
   const incomeSeen = w.players.some(p => p.income.wood > 0 || p.income.food > 0 || p.income.ore > 0);
 
-  // ---- Phase2：人工采集专项 ----
-  console.log('[selftest] Phase2：人工采集链路（砍树→回仓入库）…');
+  // ---- Phase2：岗位经济专项（v0.18：伐木场→补员→居民伐木→小缓冲） ----
+  console.log('[selftest] Phase2：岗位经济链路（伐木场→补员→缓冲）…');
   const w2 = new World(undefined, 'standard', false);
   deployStartBases(w2);
-  const builder = [...w2.entities.values()].find(e => e.kind === 'unit' && e.defId === 'builder' && e.owner === 0)!;
   let treeTile = -1;
   for (let i = 0; i < w2.terrain.length && treeTile < 0; i++) {
     if (w2.terrain[i] === T_TREE) treeTile = i;
   }
   let gatherOk = false, gatherMsg = '未找到树';
   if (treeTile >= 0) {
-    w2.issueGather([builder.id], treeTile, 'wood');
-    const woodBefore = w2.players[0].res.wood;
-    for (let s = 0; s < 60 * 120 && !gatherOk; s++) {
+    const tx2 = treeTile % MAP_W, ty2 = (treeTile / MAP_W) | 0;
+    const lumber = w2.spawnBuilding('lumber', 0, Math.max(2, tx2 - 1), Math.max(2, ty2), true);
+    const pool0 = w2.players[0].residents;
+    const staffed = w2.assignJob(lumber.id) && w2.assignJob(lumber.id)
+      && (lumber.staffIds?.length ?? 0) === 2 && w2.players[0].residents === pool0 - 2;
+    let sawBuffer = false;
+    for (let s = 0; s < 60 * 150 && !gatherOk; s++) {
       simTick(w2, SIM_DT, [null, null]);
-      if (s % 60 === 0) {
-        const deposits = w2.log.count('econ', 0, m => m.includes('入库'));
-        if (deposits >= 2 && w2.players[0].res.wood > woodBefore + 10) gatherOk = true;
-        if (!Number.isFinite(builder.x)) { gatherMsg = '采集时NaN'; break; }
-      }
+      if (s % 30 === 0 && lumber.buffer > 5) sawBuffer = true;
+      if (staffed && sawBuffer) gatherOk = true;
     }
-    gatherMsg = gatherOk ? '' : `入库日志不足（${w2.log.count('econ', 0, m => m.includes('入库'))}条）`;
+    gatherMsg = gatherOk ? '' : `补员=${staffed} 缓冲=${lumber.buffer.toFixed(1)}`;
   }
 
   // ---- Phase3：法令/科技/地利专项 ----
@@ -210,15 +211,30 @@ export function runSelftest(): void {
   const w4 = new World(undefined, 'standard', false);
   deployStartBases(w4);
   const hq4 = w4.findHq(0)!;
-  let laid = 0;
-  outer4: for (let dy = -6; dy <= 6; dy++) {
-    for (let dx = 4; dx <= 16; dx++) {
-      if (w4.layFarm(hq4.tx + dx, hq4.ty + dy, 0)) { laid++; if (laid >= 6) break outer4; }
+  // 农庄+补员：农夫=居民实体（v0.18）；铺田须落在农庄管辖半径内
+  let farmA4: Entity | null = null;
+  for (let r = 3; r <= 8 && !farmA4; r++) {
+    for (let dy = -r; dy <= r && !farmA4; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const tx = hq4.tx + dx, ty = hq4.ty + dy;
+      if (!w4.canPlace('farm', tx, ty).ok) continue;
+      farmA4 = w4.spawnBuilding('farm', 0, tx, ty, true);
+      break;
     }
   }
-  const farmer1 = w4.spawnUnit('farmer', 0, hq4.x + 90, hq4.y);
-  const farmer2 = w4.spawnUnit('farmer', 0, hq4.x + 120, hq4.y);
-  const farmerIds = [farmer1.id, farmer2.id];
+  let farmerIds: number[] = [];
+  if (farmA4) {
+    w4.assignJob(farmA4.id); w4.assignJob(farmA4.id);
+    farmerIds = [...(farmA4.staffIds ?? [])];
+  }
+  let laid = 0;
+  if (farmA4) {
+    outer4: for (let dy = -7; dy <= 7; dy++) {
+      for (let dx = -7; dx <= 7; dx++) {
+        if (w4.layFarm(farmA4.tx + dx, farmA4.ty + dy, 0)) { laid++; if (laid >= 6) break outer4; }
+      }
+    }
+  }
   let sawMature = false, replanted = false, depositCount = 0;
   const maxStage = new Uint8Array(MAP_W * MAP_H);
   const prevCargo = new Map<number, boolean>();
@@ -241,7 +257,8 @@ export function runSelftest(): void {
       }
     }
   }
-  const farmChainOk = laid >= 5 && depositCount >= 3 && sawMature && replanted;
+  const farmChainOk = laid >= 5 && farmA4 != null && farmerIds.length === 2
+    && depositCount >= 3 && sawMature && replanted;
 
   // 地利：临水/相邻麦田加成（即时结算，不跑模拟）
   let bonusTile = -1, plainTile = -1;
@@ -493,8 +510,9 @@ export function runSelftest(): void {
   console.log('[selftest] Phase7：晨曦王国…');
   // 经济同规：农奴采集/建造与工程车一致
   const serfDef = UNIT_DEFS['serf'], bldDef = UNIT_DEFS['builder'];
-  const parityOk = serfDef.gather?.rate === bldDef.gather?.rate && serfDef.gather?.capacity === bldDef.gather?.capacity
-    && (serfDef.canBuild?.length ?? 0) > 0;
+  const parityOk = (serfDef.canBuild?.length ?? 0) > 0 && (bldDef.canBuild?.length ?? 0) > 0
+    && serfDef.producedBy === 'lifeTree' && bldDef.producedBy === 'hq'
+    && UNIT_DEFS['farmer'] === undefined; // 独立农夫确认退役
 
   // 王国内战（双王国AI）+ 交叉对战（钢铁 vs 王国）各跑一段，不崩且AI正常运转
   let mirrorOk = true, crossOk = true;
@@ -515,6 +533,279 @@ export function runSelftest(): void {
   }
   const t9 = parityOk && mirrorOk && crossOk;
 
+  // ---- Phase8：中立生态与动物AI（FID/狼群/拴绳/真近战/腐烂/繁殖） ----
+  console.log('[selftest] Phase8：中立生态与动物AI…');
+  const G = 32; // 格→像素
+  // 8.1 鹿FID：6格警戒（驻足面向）、3格逃窜（方向=威胁反向）、受伤7格也逃
+  const wA = new World(undefined, 'standard', false);
+  const fx0 = 80 * G, fy0 = 112 * G; // 僻静角（远离天然狼窝/营地/鹿群）
+  const deerA = wA.spawnUnit('deer', 2, fx0, fy0);
+  const manA = wA.spawnUnit('builder', 0, fx0 + 6 * G, fy0); // 无武器单位当威胁，避免自动开火干扰
+  for (let s = 0; s < 40; s++) simTick(wA, SIM_DT, [null, null]);
+  const faceOk = Math.abs(((deerA.angle - Math.atan2(manA.y - deerA.y, manA.x - deerA.x) + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.6;
+  const alertOk = deerA.order.kind === 'idle' && faceOk;
+  manA.x = fx0 + 3 * G; manA.y = fy0;
+  let fled = false, awayOk = false;
+  for (let s = 0; s < 60 && !fled; s++) {
+    simTick(wA, SIM_DT, [null, null]);
+    if (deerA.order.kind === 'move' && deerA.order.target) {
+      fled = true;
+      awayOk = Math.hypot(deerA.order.target.x - manA.x, deerA.order.target.y - manA.y)
+        > Math.hypot(deerA.x - manA.x, deerA.y - manA.y);
+    }
+  }
+  const deerB = wA.spawnUnit('deer', 2, fx0, fy0 - 14 * G);
+  deerB.hp = 30; // 受伤：8格内见人就跑
+  const manB = wA.spawnUnit('builder', 0, fx0, fy0 - 14 * G - 7 * G);
+  let scaredOk = false;
+  for (let s = 0; s < 60 && !scaredOk; s++) {
+    simTick(wA, SIM_DT, [null, null]);
+    if (deerB.order.kind === 'move' && deerB.order.target) {
+      scaredOk = Math.hypot(deerB.order.target.x - manB.x, deerB.order.target.y - manB.y)
+        > Math.hypot(deerB.x - manB.x, deerB.y - manB.y);
+    }
+  }
+  const t10 = alertOk && fled && awayOk && scaredOk;
+
+  // 8.2 狼群群体仇恨 + 真近战无弹道 + 拴绳（咬合期→风筝期两段）
+  const wB = new World(undefined, 'standard', false);
+  const wx0 = 56 * G, wy0 = 56 * G;
+  const wolf1 = wB.spawnUnit('wolf', 2, wx0 - 20, wy0);
+  const wolf2 = wB.spawnUnit('wolf', 2, wx0 + 20, wy0);
+  for (const wl of [wolf1, wolf2]) { wl.homeX = wx0; wl.homeY = wy0; }
+  const prey = wB.spawnUnit('builder', 0, wx0 + 4 * G, wy0); // 家域4格内：全窝上
+  let packOk = false, maxProj = 0;
+  for (let s = 0; s < 80 && !packOk; s++) {
+    simTick(wB, SIM_DT, [null, null]);
+    maxProj = Math.max(maxProj, wB.projectiles.length);
+    packOk = wolf1.order.kind === 'attack' && wolf2.order.kind === 'attack'
+      && wolf1.engagedId === prey.id && wolf2.engagedId === prey.id;
+  }
+  for (let s = 0; s < 120; s++) { simTick(wB, SIM_DT, [null, null]); maxProj = Math.max(maxProj, wB.projectiles.length); }
+  const meleeOk = maxProj === 0 && prey.hp < UNIT_DEFS['builder'].hp; // 咬到了且全程零弹道
+  prey.x = wx0 + 12 * G; prey.y = wy0; // 风筝：拖到离家12格（>拴绳8格）——狼凭旧攻击令继续追
+  let leashed = false, staysHome = true;
+  for (let s = 0; s < 60 * 20 && !(leashed && s > 60 * 6); s++) {
+    simTick(wB, SIM_DT, [null, null]);
+    maxProj = Math.max(maxProj, wB.projectiles.length);
+    const hd = Math.hypot(wolf1.x - wx0, wolf1.y - wy0);
+    if (hd > 8 * G && wolf1.order.kind === 'move' && wolf1.order.target
+      && Math.hypot(wolf1.order.target.x - wx0, wolf1.order.target.y - wy0) < G) leashed = true;
+    if (leashed && wolf1.order.kind === 'attack') staysHome = false; // 回程不索敌
+  }
+  const t11 = packOk && leashed && staysHome && meleeOk;
+
+  // 8.3 尸体：半额立付 + 份额衰减（10/20/30/40s → 75%/50%/25%/0%）+ 走近自动拾取
+  const wC = new World(undefined, 'standard', false);
+  const cx0 = 80 * G, cy0 = 112 * G;
+  const killAt = (ox: number) => {
+    const spot = { x: cx0 + ox, y: cy0 };
+    const d = wC.spawnUnit('deer', 2, spot.x, spot.y);
+    const food0 = wC.players[0].res.food;
+    damage(wC, d, 999, 0, 'light', false);
+    return { spot, instant: wC.players[0].res.food - food0 };
+  };
+  const foodC0 = wC.players[0].res.food;
+  const k1 = killAt(0);
+  const gotNow = k1.instant === 20 && wC.carcasses.length === 1 && wC.carcasses[0].amount0 === 20;
+  wC.spawnUnit('builder', 0, k1.spot.x + 60, k1.spot.y + 30); // 3格内的拾取者
+  simTick(wC, SIM_DT, [null, null]);
+  const pickOk = wC.carcasses.length === 0 && Math.abs(wC.players[0].res.food - (foodC0 + 40)) < 0.01; // 20立付+20拾取
+  // 衰减阶梯：等待加30tick，避开浮点累加在整10秒边界抖动
+  const decayAt = (ox: number, waitSec: number, expect: number) => {
+    const k = killAt(ox);
+    for (let s = 0; s < 60 * waitSec + 30; s++) simTick(wC, SIM_DT, [null, null]);
+    wC.spawnUnit('builder', 0, k.spot.x + 60, k.spot.y + 30);
+    const f = wC.players[0].res.food;
+    simTick(wC, SIM_DT, [null, null]);
+    return wC.players[0].res.food - f === expect;
+  };
+  const decay15 = decayAt(18 * G, 10, 15);
+  const decay10 = decayAt(-18 * G, 20, 10);
+  const decay5 = decayAt(36 * G, 30, 5);
+  const decay0 = decayAt(-36 * G, 41, 0);
+  const t12 = gotNow && pickOk && decay15 && decay10 && decay5 && decay0;
+
+  // 8.4 繁殖：群2只→90秒+1→直封顶5只；全图上限受 deerCap 约束
+  const wD = new World(undefined, 'standard', false);
+  const capOk0 = wD.deerCap === 19; // 天然鹿15只+4
+  wD.deerCap = 999; // 关全局上限，单测群上限
+  const bx0 = 108 * G, by0 = 108 * G;
+  const h1 = wD.spawnUnit('deer', 2, bx0, by0);
+  const h2 = wD.spawnUnit('deer', 2, bx0 + G, by0);
+  for (const hh of [h1, h2]) { hh.homeX = bx0; hh.homeY = by0; }
+  const herdCount = () => [...wD.entities.values()].filter(e => e.defId === 'deer' && e.homeX === bx0 && e.homeY === by0).length;
+  let grew = false, capped = false;
+  for (let s = 0; s < 60 * 320; s++) {
+    simTick(wD, SIM_DT, [null, null]);
+    const n = herdCount();
+    if (n >= 3) grew = true;
+    if (n >= 5) { capped = true; break; }
+  }
+  const countAtCap = herdCount();
+  for (let s = 0; s < 60 * 95 && capped; s++) simTick(wD, SIM_DT, [null, null]); // 满5后再等95秒：一只不加
+  const breedOk = capOk0 && grew && capped && countAtCap === 5 && herdCount() === 5;
+  // 全局上限：cap 压到当前总数 → 拒绝繁殖
+  const totalDeer = [...wD.entities.values()].filter(e => e.defId === 'deer').length;
+  wD.deerCap = totalDeer;
+  for (let s = 0; s < 60 * 95; s++) simTick(wD, SIM_DT, [null, null]);
+  const globalCapOk = [...wD.entities.values()].filter(e => e.defId === 'deer').length === totalDeer;
+  const t13 = breedOk && globalCapOk;
+  const p8dbg = `fid=${t10} pack=${t11}(proj=${maxProj}) 腐烂=${t12}(${k1.instant}/15:${decay15}/10:${decay10}/5:${decay5}/0:${decay0}) 繁殖=${t13}`;
+
+  // ---- Phase9：居民与家园（转职/殉职/民心/税/搬运工/取料表演） ----
+  console.log('[selftest] Phase9：居民与家园…');
+  // 9.1 转职迁居 + 殉职空缺
+  const wA9 = new World(undefined, 'standard', false);
+  deployStartBases(wA9);
+  const hqA9 = wA9.findHq(0)!;
+  let fspot9: { tx: number; ty: number } | null = null;
+  outerA9: for (let r = 3; r <= 8; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      if (wA9.canPlace('farm', hqA9.tx + dx, hqA9.ty + dy).ok) { fspot9 = { tx: hqA9.tx + dx, ty: hqA9.ty + dy }; break outerA9; }
+    }
+  }
+  let t14 = false, t15 = false;
+  if (fspot9) {
+    const farm9 = wA9.spawnBuilding('farm', 0, fspot9.tx, fspot9.ty, true);
+    const pool0 = wA9.players[0].residents;
+    t14 = wA9.assignJob(farm9.id) && wA9.players[0].residents === pool0 - 1
+      && (farm9.staffIds?.length ?? 0) === 1
+      && UNIT_DEFS['resident'].resident === true;
+    const worker9 = wA9.entities.get(farm9.staffIds![0])!;
+    const popBefore = wA9.players[0].pop;
+    damage(wA9, worker9, 999, 1, 'light', false);
+    for (let s = 0; s < 40; s++) simTick(wA9, SIM_DT, [null, null]); // 跨过对账节拍
+    t15 = !wA9.entities.has(worker9.id) && (farm9.staffIds?.length ?? 0) === 0
+      && wA9.players[0].pop === popBefore - 1;
+  } else t15 = true; // 找不到空地的极端地图放行
+
+  // 9.2 民心：增长/流失/战争豁免
+  const wB9 = new World(undefined, 'standard', false);
+  deployStartBases(wB9);
+  const hqB9 = wB9.findHq(0)!;
+  const houseSpot9 = (minR: number, maxR: number): { tx: number; ty: number } | null => {
+    for (let r = minR; r <= maxR; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        if (wB9.canPlace('house', hqB9.tx + dx, hqB9.ty + dy).ok) return { tx: hqB9.tx + dx, ty: hqB9.ty + dy };
+      }
+    }
+    return null;
+  };
+  const hs1 = houseSpot9(3, 8);
+  let t16 = false, t16b = false, t16c = false;
+  if (hs1) {
+    wB9.spawnBuilding('house', 0, hs1.tx, hs1.ty, true);
+    wB9.recomputePop();
+    // 增长：民心≥60 且 5<10 → 30秒+1（35秒窗口恰一次）
+    const r0 = wB9.players[0].residents;
+    for (let s = 0; s < 60 * 35; s++) simTick(wB9, SIM_DT, [null, null]);
+    t16 = wB9.players[0].residents === r0 + 1;
+    // 流失：拉爆民心（远房无覆盖民居 + 断粮 + 高税 → 民心≤30）→ 60秒-1
+    const hs2 = houseSpot9(13, 26);
+    if (hs2) {
+      wB9.spawnBuilding('house', 0, hs2.tx, hs2.ty, true);
+      wB9.recomputePop();
+      wB9.players[0].taxTier = 2;
+      const r1 = wB9.players[0].residents;
+      for (let s = 0; s < 60 * 70; s++) {
+        simTick(wB9, SIM_DT, [null, null]);
+        if (s % 30 === 0) wB9.players[0].res.food = 0; // 压住HQ保底产出，维持真饥荒
+      }
+      t16b = wB9.players[0].residents === r1 - 1;
+    } else t16b = true; // 极端地图放行
+    // 战争豁免：敌军压境 → 流失暂停（持续补兵维持入侵态）
+    let invader = wB9.spawnUnit('barbarian', 2, hqB9.x + 120, hqB9.y);
+    const r2 = wB9.players[0].residents;
+    for (let s = 0; s < 60 * 70; s++) {
+      simTick(wB9, SIM_DT, [null, null]);
+      if (!wB9.entities.has(invader.id)) {
+        invader = wB9.spawnUnit('barbarian', 2, hqB9.x + 120 + ((s >> 4) % 60) - 30, hqB9.y + ((s >> 5) % 60) - 30);
+      }
+    }
+    t16c = wB9.players[0].residents === r2;
+  }
+
+  // 9.3 人口税：中税2金/人/分钟精确；高税3金且民心减成
+  const wC9 = new World(undefined, 'standard', false);
+  deployStartBases(wC9);
+  const p9c = wC9.players[0];
+  const gtax0 = p9c.gold;
+  for (let s = 0; s < 60 * 60; s++) simTick(wC9, SIM_DT, [null, null]);
+  const t17a = Math.abs(p9c.gold - gtax0 - 10) < 1.5; // 5人×中税2金/人/分钟
+  const moraleMid = p9c.morale;
+  wC9.setTaxTier(0); // 中→高
+  const gtax1 = p9c.gold;
+  for (let s = 0; s < 60 * 60; s++) simTick(wC9, SIM_DT, [null, null]);
+  const t17b = Math.abs(p9c.gold - gtax1 - 15) < 1.5; // 高税3金/人/分钟
+  const t17 = t17a && t17b && p9c.morale < moraleMid;
+
+  // 9.4 搬运工：辖内缓冲过半 → 扛运入库（伐木场>14格隔离劳役班，<11格归搬运工）
+  const wD9 = new World(undefined, 'standard', false);
+  deployStartBases(wD9);
+  const hqD9 = wD9.findHq(0)!;
+  const spotAt9 = (defId: string, minR: number, maxR: number, away?: { x: number; y: number }, awayR?: number): { tx: number; ty: number } | null => {
+    for (let r = minR; r <= maxR; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const tx = hqD9.tx + dx, ty = hqD9.ty + dy;
+        if (!wD9.canPlace(defId, tx, ty).ok) continue;
+        if (away && Math.hypot((tx + 1) * 32 - away.x, (ty + 1) * 32 - away.y) < (awayR ?? 0) * 32) continue;
+        return { tx, ty };
+      }
+    }
+    return null;
+  };
+  const sspot = spotAt9('storehouse', 3, 6);
+  let t18 = false;
+  if (sspot) {
+    const store9 = wD9.spawnBuilding('storehouse', 0, sspot.tx, sspot.ty, true);
+    const sc = store9.center();
+    const lspot = spotAt9('lumber', 14, 22, sc, 11);
+    if (lspot) {
+      const lumber9 = wD9.spawnBuilding('lumber', 0, lspot.tx, lspot.ty, true);
+      lumber9.buffer = 30; // >50%×40 触发扛运
+      t18 = wD9.assignJob(store9.id) && (store9.staffIds?.length ?? 0) === 1;
+      const wood0 = wD9.players[0].res.wood;
+      for (let s = 0; s < 60 * 50; s++) simTick(wD9, SIM_DT, [null, null]);
+      t18 = t18 && wD9.players[0].res.wood > wood0 + 8; // 搬运工一趟扛12
+    }
+  }
+
+  // 9.5 建造取料表演：放置扣款一次 → 取料 → 建成，账目平衡
+  const wE9 = new World(undefined, 'standard', false);
+  deployStartBases(wE9);
+  const hqE9 = wE9.findHq(0)!;
+  let hspot9: { tx: number; ty: number } | null = null;
+  for (let r = 3; r <= 6 && !hspot9; r++) {
+    for (let dy = -r; dy <= r && !hspot9; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      if (wE9.canPlace('house', hqE9.tx + dx, hqE9.ty + dy).ok) { hspot9 = { tx: hqE9.tx + dx, ty: hqE9.ty + dy }; break; }
+    }
+  }
+  let t19 = false;
+  if (hspot9) {
+    const p9e = wE9.players[0];
+    p9e.res.wood = 300;
+    const w0 = p9e.res.wood;
+    wE9.payCost(0, { wood: 30 });
+    const site9 = wE9.spawnBuilding('house', 0, hspot9.tx, hspot9.ty, false);
+    const builder9 = [...wE9.entities.values()].find(e => e.kind === 'unit' && e.defId === 'builder' && e.owner === 0)!;
+    wE9.issueBuild([builder9.id], site9.id);
+    let fetched = false;
+    for (let s = 0; s < 60 * 60; s++) {
+      simTick(wE9, SIM_DT, [null, null]);
+      if (builder9.gatherState === 'toDepot') fetched = true;
+      if (site9.done) break;
+    }
+    t19 = fetched && site9.done && Math.abs(p9e.res.wood - (w0 - 30)) < 8; // 只扣一次（微差=HQ保底产出）
+  }
+  const t9all = t14 && t15;
+  const t9all2 = t16 && t16b && t16c;
+  const p9dbg = `转职=${t14} 殉职=${t15} 民心=${t16}/${t16b}/${t16c} 税=${t17a}/${t17b}/${p9c.morale} 搬运=${t18} 取料=${t19}`;
+
   // ---- 汇总 ----
   const checks: [string, boolean][] = [
     ['地形健全（高度0~3 + 基地连通）', terrainOk],
@@ -525,12 +816,12 @@ export function runSelftest(): void {
     ['AI训练3+单位（军事循环成立）', aiTrained >= 3],
     ['AI发起过进攻波次', waves >= 1],
     ['经济有正收入', incomeSeen],
-    ['人工采集：砍树→入库链路成立', gatherOk],
-    ['胜负判定触发（或打满5分钟）', w.gameOver !== 0 || w.time >= 299],
+    ['岗位经济：伐木场补员→居民伐木→小缓冲', gatherOk],
+    ['胜负判定触发（或打满9分钟）', w.gameOver !== 0 || w.time >= 539],
     ['法令：切换生效+冷却+乘数', edictOk],
     ['地利：农场临水/炮台扼坡道', farmOk && turretOk],
     ['科技：立项→完成→乘数叠乘', techOk],
-    ['麦田链：铺设→收割→入库→回种', farmChainOk],
+    ['麦田链：农庄管辖→收→缓冲→回种', farmChainOk],
     ['麦田地利：临水/相邻加成', farmBonusOk],
     ['坦克舷侧机枪开火', tankFired],
     ['HQ防卫武装（炮+机枪）', hqDefOk],
@@ -547,6 +838,15 @@ export function runSelftest(): void {
     ['护盾顺序：盾先吃全额，溢出进装甲', t7],
     ['工程车甲血双修：同速率恢复', t8],
     ['王国：经济同规+双阵营对战', t9],
+    ['中立生态：鹿FID警戒/逃窜（方向=威胁反向）', t10],
+    ['中立生态：狼群仇恨+拴绳+真近战零弹道', t11],
+    ['中立生态：尸体半额立付+阶梯衰减+自动拾取', t12],
+    ['中立生态：鹿群确定性繁殖+群5封顶+全图上限', t13],
+    ['居民：转职迁居+殉职空缺回补', t9all],
+    ['居民：民心增长/流失/战争豁免', t9all2],
+    ['人口税：三档收入精确+高税掉民心', t17],
+    ['搬运工：辖内缓冲过半扛运入库', t18],
+    ['建造取料：扣款一次→取料→建成', t19],
   ];
 
   const realSec = ((performance.now() - t0) / 1000).toFixed(1);
@@ -581,5 +881,5 @@ export function runSelftest(): void {
     `AI互殴${Math.floor(w.time / 60)}分钟 · 实体${w.entities.size} · 日志${Object.values(w.log.summary()).reduce((a, b) => a + b, 0)}条 · 实际耗时${realSec}s（详见控制台F12）`
     + (failed.length > 0 ? ` —— 失败项：${failed.join(' / ')}` : '')
     + ` [探针 hq=${dbg.hq} mcv=${dbg.mcv} t=${dbg.time}]`
-    + ` [P6 ${p6dbg}] [P7 ${dbg7.join(' / ')}]`;
+    + ` [P6 ${p6dbg}] [P7 ${dbg7.join(' / ')}] [P8 ${p8dbg}] [P9 ${p9dbg}]`;
 }

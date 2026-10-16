@@ -25,10 +25,14 @@ export class HUD {
   private lastPanelSig = '';
 
   constructor(private game: Game) {
+    document.getElementById('btn-tax')?.addEventListener('click', () => {
+      this.game.world.setTaxTier(0);
+      this.refreshT = 0;
+    });
     this.panel.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('button[data-act]') as HTMLButtonElement | null;
       if (!btn || btn.disabled) return;
-      const [act, arg] = btn.dataset.act!.split(':');
+      const [act, arg, arg2] = btn.dataset.act!.split(':');
       if (act === 'build') this.game.startPlacement(arg);
       else if (act === 'unit') this.game.queueUnit(arg);
       else if (act === 'rally') this.game.clearRallyHint();
@@ -43,6 +47,17 @@ export class HUD {
         const w = this.game.world;
         const ok = act === 'sell' ? w.marketSell(0, arg as Res) : w.marketBuy(0, arg as Res);
         if (!ok) this.toast(act === 'sell' ? '资源不足100' : '金币不足70或仓库空间不足');
+        this.refreshT = 0;
+      } else if (act === 'jobadd') {
+        const b = this.game.world.entities.get(Number(arg));
+        if (!b || !this.game.world.assignJob(b.id)) this.toast('没有待业居民可分配（等移民或盖民居）');
+        this.refreshT = 0;
+      } else if (act === 'jobrem') {
+        this.game.world.unassignJob(Number(arg));
+        this.refreshT = 0;
+      } else if (act === 'fire') {
+        // 解雇卡：点名开除某个居民（回待业池）
+        this.game.world.unassignJob(Number(arg2), Number(arg));
         this.refreshT = 0;
       } else if (act === 'edict') {
         const ok = this.game.world.setEdict(0, arg as EdictId);
@@ -100,9 +115,12 @@ export class HUD {
     set('rate-food', ` +${p.income.food.toFixed(1)}/s`);
     set('rate-ore', ` +${p.income.ore.toFixed(1)}/s`);
     const pop = document.getElementById('pop')!;
-    const popStr = Number.isInteger(p.pop) ? String(p.pop) : p.pop.toFixed(1);
-    pop.textContent = `${popStr}/${p.popCap}`;
+    pop.textContent = `${p.pop}/${p.popCap}（闲${p.residents}）`;
     pop.classList.toggle('warn', p.pop >= p.popCap);
+    set('morale', String(p.morale));
+    set('morale-trend', p.morale >= 60 && p.pop < p.popCap ? ' ↑招人中' : p.morale <= 30 ? ' ↓流失中' : '');
+    const taxBtn = document.getElementById('btn-tax');
+    if (taxBtn) taxBtn.textContent = `税:${['低', '中', '高'][p.taxTier]}`;
     const goldEl = document.getElementById('gold');
     if (goldEl) goldEl.textContent = String(Math.floor(p.gold));
     const crown = document.getElementById('crown');
@@ -125,6 +143,7 @@ export class HUD {
     const p0 = w.players[0];
     const selSig = sel.map(e => {
       let s = `${e.id}:${e.defId}:${e.done ? Math.ceil(e.hp) : Math.floor(e.progress * 10)}:${e.queue.length}`;
+      if (e.done && BUILDING_DEFS[e.defId]?.jobs) s += `:${e.staffIds?.length ?? 0}:${Math.floor(e.buffer)}`; // 岗位人数/缓冲变化→重建面板
       const isMainDef = BUILDING_DEFS[e.defId]?.isMain === true;
       if (e.done && (e.adjLabel || isMainDef)) {
         s += `:${e.adjLabel ?? ''}`;
@@ -164,10 +183,6 @@ export class HUD {
         }
         html += `</div>`;
       }
-      // 农夫：麦田铺设入口
-      if (units.some(u => u.defId === 'farmer')) {
-        html += `<div class="btnrow"><button class="btn ${g.input.paintMode ? 'active' : ''}" data-act="paint:farm">开垦麦田<span class="cost">🪵5/格 · 拖框铺设</span></button></div>`;
-      }
       // 基地车：展开基地
       if (units.some(u => u.defId === 'mcv')) {
         html += `<div class="btnrow"><button class="btn" data-act="deploy:mcv">展开基地<span class="cost">原地变身指挥基地</span></button></div>`;
@@ -190,8 +205,8 @@ export class HUD {
         for (const uid of def.produces) {
           const udef = UNIT_DEFS[uid];
           const afford = w.canAfford(0, udef.cost);
-          const room = w.players[0].pop < w.players[0].popCap;
-          html += `<button class="btn" data-act="unit:${uid}" ${afford && room ? '' : 'disabled'}>${udef.name}<span class="cost">${costText(udef.cost)} · ${udef.buildTime}s</span></button>`;
+          const room = (UNIT_DEFS[uid].crew ?? 0) === 0 || w.players[0].residents >= 1;
+          html += `<button class="btn" data-act="unit:${uid}" ${afford && room ? '' : 'disabled'}>${udef.name}<span class="cost">${costText(udef.cost)}${(UNIT_DEFS[uid].crew ?? 0) > 0 ? ' · 👥1' : ''} · ${udef.buildTime}s</span></button>`;
         }
         html += `</div>`;
         if (totalQ > 0) html += `<div class="queue">全部队列：${totalQ} 个单位</div>`;
@@ -218,6 +233,40 @@ export class HUD {
       }
       // 地利加成展示
       if (b.done && b.adjLabel) html += `<div class="queue" style="color:#9fd18f">地利：${b.adjLabel}</div>`;
+      // 岗位槽（居民与家园v0.18）：分配卡片——一人一卡，点卡解雇
+      if (b.done && def.jobs) {
+        const staffIds = b.staffIds ?? [];
+        const jobName = { farmer: '农民', lumberjack: '伐木工', miner: '矿工', hauler: '搬运工' }[def.jobs.kind];
+        const idle = w.players[0].residents;
+        html += `<div class="hint" style="font-size:12px;margin-top:4px">岗位：${jobName} ${staffIds.length}/${def.jobs.slots}${staffIds.length < def.jobs.slots ? ' <span style="color:#ffd75e">⚠缺人</span>' : ''} · 待业居民 ${idle}</div>`;
+        if (staffIds.length > 0) {
+          html += `<div class="btnrow">`;
+          for (const wid of staffIds) {
+            const wk = w.entities.get(wid);
+            if (!wk) continue;
+            const state = wk.order.kind === 'move' ? '前往中' : (wk.jobT ?? 0) > 0 ? '劳作中' : '在岗';
+            html += `<button class="btn" data-act="fire:${wid}:${b.id}" title="点击解雇：该居民回待业池">👷 ${jobName} · ${state}<span class="cost">点击解雇</span></button>`;
+          }
+          html += `</div>`;
+        }
+        if (staffIds.length < def.jobs.slots) {
+          html += `<div class="btnrow"><button class="btn" data-act="jobadd:${b.id}" ${idle >= 1 ? '' : 'disabled'}>＋分配居民上岗<span class="cost">从住房迁居来上班</span></button></div>`;
+        }
+      }
+      // 民居：卫生覆盖状态
+      if (b.done && b.defId === 'house') {
+        let covered = false;
+        for (const src of w.entities.values()) {
+          if (src.kind !== 'building' || !src.done || src.owner !== 0) continue;
+          const r = (BUILDING_DEFS[src.defId].hygieneR ?? 0) * 32;
+          if (r > 0 && Math.hypot(src.x - b.x, src.y - b.y) <= r) { covered = true; break; }
+        }
+        html += `<div class="queue" style="color:${covered ? '#9fd18f' : '#ff8a70'}">卫生覆盖：${covered ? '✔ 有人管' : '✘ 无人管（民心受损）'}</div>`;
+      }
+      // 农庄：麦田铺设入口（拖框铺田，归属本庄）
+      if (b.done && BUILDING_DEFS[b.defId].jobs?.kind === 'farmer') {
+        html += `<div class="btnrow"><button class="btn ${g.input.paintMode ? 'active' : ''}" data-act="paint:farm">开垦麦田<span class="cost">🪵5/格 · 本庄${8}格内拖框铺设</span></button></div>`;
+      }
       // 主堡：法令四选一（双阵营主堡通用）
       if (b.done && BUILDING_DEFS[b.defId].isMain) {
         const p = w.players[0];
@@ -280,15 +329,15 @@ export class HUD {
         for (const uid of def.produces) {
           const udef = UNIT_DEFS[uid];
           const afford = w.canAfford(0, udef.cost);
-          const room = w.players[0].pop < w.players[0].popCap;
-          html += `<button class="btn" data-act="unit:${uid}" ${afford && room ? '' : 'disabled'}>${udef.name}<span class="cost">${costText(udef.cost)} · ${udef.buildTime}s</span></button>`;
+          const room = (UNIT_DEFS[uid].crew ?? 0) === 0 || w.players[0].residents >= 1;
+          html += `<button class="btn" data-act="unit:${uid}" ${afford && room ? '' : 'disabled'}>${udef.name}<span class="cost">${costText(udef.cost)}${(UNIT_DEFS[uid].crew ?? 0) > 0 ? ' · 👥1' : ''} · ${udef.buildTime}s</span></button>`;
         }
         html += `</div>`;
       }
       let progPct = -1;
-      if (def.bufferCap) {
-        // 自动机：内部缓冲仓状态
-        html += `<div class="queue">储备仓：${Math.floor(b.buffer)}/${def.bufferCap}${b.bufferStalled ? ' · <span style="color:#ff8a70">满仓停机中</span>' : ''}</div>`;
+      if (def.jobs && def.jobs.bufferCap > 0) {
+        // 岗位建筑：小缓冲状态（搬运工/劳役班转运）
+        html += `<div class="queue">小缓冲：${Math.floor(b.buffer)}/${def.jobs.bufferCap}${b.bufferStalled ? ' · <span style="color:#ff8a70">缓冲满——需要搬运工/仓库</span>' : ''}</div>`;
       }
       if (b.done && b.queue.length > 0) {
         const item = b.queue[0];

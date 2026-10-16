@@ -13,9 +13,34 @@ export const FOG_SCAN_INTERVAL = 12;  // 单位索敌扫描间隔
 export const START_RES = { wood: 300, food: 200, ore: 150 } as const;
 export const STORAGE_BASE = 500;          // 基础存储上限（HQ自带，须高于初始资源）
 export const STORAGE_PER_STOREHOUSE = 500; // 每座仓库提升的上限
-export const POP_BASE = 10;           // 基础人口上限（HQ另加）
-export const POP_PER_FARM = 10;
-export const POP_MAX = 100;
+
+/** 居民与家园（v0.18 经济重构：人口-岗位-物流） */
+export const POP_START = 5;            // 开局实际人口（帝国中心+5容量刚好住满）
+export const POP_FLOOR = 5;            // 流失地板：初始人口不走光（战死不算流失）
+export const HOUSE_CAP = 5;            // 每座民居/帝国中心的容量
+export const POP_MAX = 200;            // 容量硬顶
+export const MORALE_GROW_AT = 60;      // 民心≥60 且人口<容量 → 每30秒+1
+export const MORALE_LOSS_AT = 30;      // 民心≤30 → 每60秒-1
+export const GROW_EVERY = 30;          // 增长节拍（秒）
+export const LOSS_EVERY = 60;          // 流失节拍（秒）
+export const FOOD_PER_POP = 10;        // 食物充足线：库存≥人口×10 满分，线性衰减到0
+export const TAX_FACTORS = [1, 2, 3];  // 三档税率：金/人/分钟（低/中/高）
+export const TAX_COMFORT = [1.0, 0.6, 0.2]; // 税率舒适度分量（低/中/高）
+/** 民心 = 100×(0.4×卫生覆盖 + 0.4×食物充足 + 0.2×税率舒适) */
+export const W_HYGIENE = 0.4, W_FOOD = 0.4, W_TAX = 0.2;
+/** 卫生覆盖半径（格）：帝国中心自带保健班，净水站/卫生所/澡堂罩民居 */
+export const HYGIENE_R_MAIN = 10, HYGIENE_R_WATER = 7, HYGIENE_R_CLINIC = 6, HYGIENE_R_BATH = 8;
+/** 岗位劳动参数 */
+export const WORKER_RATE = 1.0;        // 伐木工/矿工在资源旁的开采速率（/秒）
+export const WORKER_CARRY = 10;        // 一趟载货上限
+export const JOB_R_LUMBER = 6;         // 伐木场管辖半径（格）
+export const JOB_R_MINE = 4;           // 晶窟采矿半径（格）
+export const JOB_R_FARM = 8;           // 农庄管辖半径（格）——拖框铺田须落在某农庄半径内
+export const HAULER_RANGE = 12;        // 仓库搬运工服务半径（格）
+export const HAULER_LOAD = 12;         // 搬运工一趟扛运量
+export const HAULER_TRIG = 0.5;        // 辖内建筑缓冲>50%触发扛运
+export const HQ_LABOR_RATE = 1.5;      // 帝国中心劳役班：半径内缓冲漏斗入库速率（/秒，无搬运工时的保底物流）
+export const HQ_LABOR_RANGE = 12;      // 劳役班服务半径（格）
 
 export const ZOOM_MIN = 0.45;
 export const ZOOM_MAX = 2.4;
@@ -58,6 +83,16 @@ export const ARMOR_PIERCE_MULT = 2;
 /** 三十息再生（全阵营通用律）：脱战30秒后回血2%/s，受伤即重置；只回血不回甲 */
 export const REGEN_DELAY = 30;
 export const REGEN_RATE = 0.02;
+
+/** 中立生态（v0.17）：FID/拴绳/腐烂/繁殖（格为单位） */
+export const DEER_ALERT_RADIUS = 6;      // 鹿警戒：停下面向威胁
+export const DEER_FLEE_RADIUS = 4;       // 鹿逃窜：进入此距离或受击
+export const DEER_FLEE_DIST = 8;         // 逃窜距离（威胁反方向）
+export const WOLF_TERRITORY = 5;         // 狼家域：入侵者进入此距离触发群体仇恨
+export const WOLF_LEASH = 8;             // 拴绳：追击离家超过此距离自动断追回家
+export const CARCASS_DECAY_STEP = 10;    // 尸体衰减步长（秒）
+export const CARCASS_DECAY_PCT = 25;     // 每步衰减（按原始bounty%）
+export const CARCASS_PICKUP_RADIUS = 3;  // 尸体自动拾取半径（格）
 
 /** 弹道视觉速度（纯外观，按visual查表；武器可用speed覆盖） */
 export const VISUAL_SPEED: Record<string, number> = { bullet: 520, shell: 380, cannon: 260, missile: 240, flame: 300 };

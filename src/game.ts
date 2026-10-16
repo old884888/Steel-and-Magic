@@ -102,12 +102,27 @@ export class Game {
   }
 
   private renderFrame(): void {
+    // 自愈视口：画布CSS尺寸与镜头视口失配（漏发的resize/跨屏拖拽/浏览器缩放/停靠切换）下一帧自动对齐
+    if (this.canvas.clientWidth !== this.cam.viewW || this.canvas.clientHeight !== this.cam.viewH) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+      this.canvas.width = Math.floor(w * dpr);
+      this.canvas.height = Math.floor(h * dpr);
+      this.canvas.style.width = w + 'px';
+      this.canvas.style.height = h + 'px';
+      this.canvas.getContext('2d')!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.cam.setViewport(w, h);
+      this.cam.clamp();
+      this.renderer.setDpr(dpr);
+    }
     // 键盘平移 + 屏幕边缘滚屏（光标贴边等同方向键）
     const axis = this.input.panAxis();
     const edge = this.input.edgePanAxis();
     const px = axis.x + edge.x, py = axis.y + edge.y;
     if (px !== 0 || py !== 0) {
-      const speed = 520 / this.cam.zoom * SIM_DT * 3;
+      // 贴边滚屏600 css px/s≈0.45屏/秒（v0.18.1 从1560砍下：小屏躲不开边缘，炮筒般的贴边滚屏把点击精度全吃了）；键盘滚屏保持快速
+      const useEdge = (edge.x !== 0 || edge.y !== 0) && axis.x === 0 && axis.y === 0;
+      const speed = (useEdge ? 600 : 1560) / this.cam.zoom * SIM_DT;
       this.cam.pan(px * speed, py * speed);
     }
     // 铺设拖框的格范围（渲染层画预览）
@@ -210,23 +225,7 @@ export class Game {
         return;
       }
     }
-    // 人工采集：点在树上砍树、点在矿上挖矿（工程车）
-    const tx = Math.floor(pos.x / TILE), ty = Math.floor(pos.y / TILE);
-    const tileIdx = ty * MAP_W + tx;
-    const gatherers = ids.filter(id => UNIT_DEFS[this.world.entities.get(id)!.defId].gather);
-    if (gatherers.length > 0 && tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H) {
-      const t = this.world.terrain[tileIdx];
-      if (t === T_TREE) {
-        this.world.issueGather(gatherers, tileIdx, 'wood');
-        this.hud.toast(`开工砍树（${gatherers.length}辆工程车）`);
-        return;
-      }
-      if (t === T_ORE) {
-        this.world.issueGather(gatherers, tileIdx, 'ore');
-        this.hud.toast(`开工采矿（${gatherers.length}辆工程车）`);
-        return;
-      }
-    }
+    // v0.18：人工采集已退役（资源靠居民岗位）——右键树/矿直接视为移动
     // 默认移动 + 落点标识
     this.world.issueMove(ids, pos);
     this.world.addFx(pos.x, pos.y, 'mark', 0, 1.2, undefined, '➤ 移动', '#7dff7d');

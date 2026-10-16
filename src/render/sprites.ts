@@ -167,8 +167,8 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':t', turret);
         break;
       }
-      case 'farmer': {
-        // 车体…不对，是人体：粗布衣+草帽的田间劳作者
+      case 'resident': {
+        // 居民：粗布衣的劳动人民（岗位由雇主建筑决定，造型朴素通用）
         let ctx: CanvasRenderingContext2D;
         [hull, ctx] = mk(18, 18);
         circle(ctx, 9, 10, 6, p.primary);
@@ -180,9 +180,9 @@ export function getUnitSprites(defId: string, owner: number): UnitSprites {
         cache.set(key + ':h', hull);
         let tc: CanvasRenderingContext2D;
         [turret, tc] = mk(18, 8);
-        tc.fillStyle = '#6b4f2a';                        // 锄头柄
+        tc.fillStyle = '#6b4f2a';                        // 随身工具柄（锄/锯/镐通用）
         tc.fillRect(3, 3.2, 12, 2);
-        tc.fillStyle = '#8a919c';                        // 锄头铁头
+        tc.fillStyle = '#8a919c';
         tc.fillRect(13, 1.8, 3.4, 4.4);
         cache.set(key + ':t', turret);
         break;
@@ -1054,6 +1054,51 @@ export function getBuildingSprites(defId: string, owner: number): BuildingSprite
         ctx.fillStyle = '#7ec8e8';
         circle(ctx, S / 2, 12, 10, '#7ec8e8');
         circle(ctx, S / 2, 12, 5, '#d8f0f8');
+        break;
+      }
+      case 'house': {
+        // 民居：坡顶小屋
+        ctx.fillStyle = '#8a6a45';
+        ctx.fillRect(6, S / 2, S - 12, S / 2 - 6);
+        ctx.fillStyle = '#a5793f';
+        ctx.beginPath(); ctx.moveTo(3, S / 2 + 2); ctx.lineTo(S / 2, 6); ctx.lineTo(S - 3, S / 2 + 2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#4a3826';
+        ctx.fillRect(S / 2 - 4, S / 2 + 12, 8, S / 2 - 18);   // 门
+        circle(ctx, S / 2 + 9, S / 2 + 10, 2.5, '#ffd76e');   // 窗灯
+        break;
+      }
+      case 'waterStation': {
+        // 净水站：蓝顶泵房+水管
+        rr(ctx, 3, 8, S - 6, S - 14, 4, '#5a7a9a');
+        rr(ctx, 7, 12, S - 14, S - 24, 3, '#7da3c4');
+        circle(ctx, S / 2, 10, 6, '#6db3e8');
+        circle(ctx, S / 2, 10, 3, '#a8d8f8');
+        ctx.fillStyle = '#4a6a8a';
+        ctx.fillRect(S / 2 - 3, 16, 6, S - 22);
+        break;
+      }
+      case 'clinic': {
+        // 卫生所：白房红十字
+        rr(ctx, 3, 6, S - 6, S - 12, 4, '#c8cdd4');
+        rr(ctx, 7, 10, S - 14, S - 22, 3, '#e8ecf0');
+        ctx.fillStyle = '#e05a4a';
+        ctx.fillRect(S / 2 - 3, S / 2 - 9, 6, 18);
+        ctx.fillRect(S / 2 - 9, S / 2 - 3, 18, 6);
+        break;
+      }
+      case 'bath': {
+        // 澡堂：圆顶浴室+烟囱蒸汽
+        rr(ctx, 3, 10, S - 6, S - 16, 8, '#8a6a5a');
+        ctx.fillStyle = '#c8a05a';
+        ctx.beginPath(); ctx.arc(S / 2, 14, S / 2 - 8, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#e8d8c0';
+        for (const sx of [S / 2 - 8, S / 2 + 2]) {
+          ctx.globalAlpha = 0.5;
+          circle(ctx, sx, 8, 3, '#e8d8c0');
+          ctx.globalAlpha = 1;
+        }
+        ctx.fillStyle = '#4a6a8a';
+        ctx.fillRect(8, S - 18, S - 16, 8);   // 门帘
         break;
       }
       case 'wall': {

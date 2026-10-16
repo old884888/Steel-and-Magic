@@ -1,14 +1,14 @@
 import {
   MAP_W, MAP_H, TILE, T_GRASS, T_ORE, T_TREE, T_WATER, T_RAMP, T_FORD, T_FARM,
-  START_RES, POP_BASE, POP_MAX, PATH_BUDGET, OWNER_PLAYER,
-  STORAGE_BASE, FARM_YIELD,
+  START_RES, POP_MAX, POP_START, PATH_BUDGET, OWNER_PLAYER,
+  STORAGE_BASE, FARM_YIELD, JOB_R_FARM,
 } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import { SpatialHash, dist } from '../engine/spatialHash';
 import { nearestWalkable } from '../engine/astar';
 import type { Entity } from './entity';
-import type { Wreck, FireZone } from '../types';
+import type { Wreck, FireZone, Carcass } from '../types';
 import { makeUnit, makeBuilding } from './entity';
 import type { FxEvent, Faction, Projectile, Res, ResAmount, Vec } from '../types';
 import { generateMap, type MapVariant } from './mapgen';
@@ -28,10 +28,15 @@ export interface PlayerState {
   income: { wood: number; food: number; ore: number };
   incomeMul: number;           // 经济倍率（AI难度旋钮，玩家恒为1）
   storageCap: number;          // 资源存储上限（三资源共用）
-  pop: number;
-  popCap: number;
+  pop: number;                 // 实际人口 = 待业 + 在岗/在途居民 + 兵籍（乘员）
+  popCap: number;              // 人口容量（帝国中心+民居）
+  residents: number;           // 待业居民池（非实体；受雇才从住房走出来）
+  taxTier: 0 | 1 | 2;          // 税率档（低/中/高）
+  morale: number;              // 民心 0~100
+  growT: number;               // 增长节拍计时
+  lossT: number;               // 流失节拍计时
   defeat: boolean;
-  gold: number;                // 金币：不可开采、无上限的软通货（贸易/卖资源）
+  gold: number;                // 金币：不可开采、无上限的软通货（贸易/卖资源/人口税）
   era: 0 | 1 | 2;              // 纪元：0拓荒 / 1工业 / 2钢铁
   edict: EdictId | null;       // 当前法令（全局四选一）
   edictCd: number;             // 法令切换冷却（秒）
@@ -76,6 +81,8 @@ export class World {
   projectiles: Projectile[] = [];
   fx: FxEvent[] = [];
   wrecks: Wreck[] = [];               // 战场遗迹（尸体/残骸/废墟），上限40 FIFO
+  carcasses: Carcass[] = [];          // 野物尸体（剩余bounty份额，衰减+自动拾取）
+  deerCap = 0;                        // 全图鹿上限=初始+4（spawnNeutrals写入）
   fireZones: FireZone[] = [];         // 地面燃烧区（爆炸弹产生）
   dirtyTiles = new Set<number>();   // 地形变化（渲染层重绘用）
 
@@ -109,8 +116,8 @@ export class World {
     this.farmPlanted = new Float32Array(MAP_W * MAP_H).fill(-1);
     this.fog = [new Uint8Array(MAP_W * MAP_H), new Uint8Array(MAP_W * MAP_H)];
     this.players = [
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[0] },
-      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: 0, popCap: POP_BASE, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[1] },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: POP_START, popCap: POP_START, residents: POP_START, taxTier: 1, morale: 100, growT: 0, lossT: 0, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[0] },
+      { res: { ...START_RES }, income: { wood: 0, food: 0, ore: 0 }, incomeMul: 1, storageCap: STORAGE_BASE, pop: POP_START, popCap: POP_START, residents: POP_START, taxTier: 1, morale: 100, growT: 0, lossT: 0, defeat: false, gold: 0, era: 0, edict: null, edictCd: 0, techs: [], research: null, faction: factions[1] },
     ];
     this.refreshWalkableAll();
     // 舰船通行网格：只有深水可航行（滩头T_FORD是陆地通道，舰船禁行）
@@ -303,6 +310,16 @@ export class World {
     const e = this.entities.get(id);
     if (!e) return;
     this.entities.delete(id);
+    // 岗位建筑被毁：在岗/在途居民殉职（人口-1/人，岗位自然空缺）
+    if (e.kind === 'building' && e.staffIds && e.staffIds.length > 0) {
+      const staff = e.staffIds;
+      e.staffIds = [];
+      for (const sid of staff) {
+        const u = this.entities.get(sid);
+        if (u) this.removeEntity(sid);
+      }
+      void staff;
+    }
     if (e.kind === 'building') {
       const def = BUILDING_DEFS[e.defId];
       for (let dy = 0; dy < def.size; dy++) {
@@ -366,11 +383,20 @@ export class World {
 
   // ================= 麦田链（铺设→种植→生长→收割→入库→回种） =================
 
-  /** 铺设一块麦田（茬地）：仅草地、无建筑、无主。成功返回true（调用方负责扣钱） */
+  /** 铺设一块麦田（茬地）：仅草地、无建筑、无主，且须在某座自家农庄管辖半径内。成功返回true（调用方负责扣钱） */
   layFarm(tx: number, ty: number, owner: number): boolean {
     if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return false;
     const i = ty * MAP_W + tx;
     if (this.terrain[i] !== T_GRASS || this.occupied[i] || this.farmOwner[i] !== 0) return false;
+    // 管辖：拖框铺田归属最近农庄——半径内必须有自家已建成农庄
+    let hasFarm = false;
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'building' || !e.done || e.owner !== owner) continue;
+      const jobs = BUILDING_DEFS[e.defId].jobs;
+      if (!jobs || jobs.kind !== 'farmer') continue;
+      if (dist((tx + 0.5) * TILE, (ty + 0.5) * TILE, e.x, e.y) <= JOB_R_FARM * TILE) { hasFarm = true; break; }
+    }
+    if (!hasFarm) return false;
     this.terrain[i] = T_FARM;
     this.farmOwner[i] = owner;
     this.farmStage[i] = 0;
@@ -538,6 +564,17 @@ export class World {
       }
       if (trees < 5) return { ok: false, reason: '周围4格内树木不足（需≥5棵）' };
     }
+    if (def.needNear) {
+      // 澡堂类：须邻近自家已建成的指定建筑
+      let near = false;
+      const cx = (tx + def.size / 2) * TILE, cy = (ty + def.size / 2) * TILE;
+      for (const o of this.entities.values()) {
+        if (o.kind !== 'building' || !o.done || o.owner > 1) continue;
+        if (o.defId !== def.needNear.defId) continue;
+        if (Math.hypot(o.x - cx, o.y - cy) <= def.needNear.dist * TILE) { near = true; break; }
+      }
+      if (!near) return { ok: false, reason: `须建在${BUILDING_DEFS[def.needNear.defId]?.name ?? def.needNear.defId}旁（${def.needNear.dist}格内）` };
+    }
     return { ok: true, reason: '' };
   }
 
@@ -568,23 +605,84 @@ export class World {
     return this.canAfford(owner, cost);
   }
 
-  /** 人口：存活单位（按兵种占用权重）+ 排队中的单位 */
+  /** 人口统计（居民与家园v0.18）：人口 = 待业池 + 居民实体（在岗/在途）+ 兵籍乘员；容量 = 帝国中心+民居 */
   recomputePop(): void {
     for (const owner of [0, 1] as const) {
-      let pop = 0, cap = 0;
+      let cap = 0, people = 0;
       for (const e of this.entities.values()) {
         if (e.owner !== owner) continue;
-        if (e.kind === 'unit') pop += UNIT_DEFS[e.defId].pop ?? 1;
-        else if (e.done) {
-          const def = BUILDING_DEFS[e.defId];
-          cap += def.popBonus ?? 0;
-          if (def.produces) pop += e.queue.length;
+        if (e.kind === 'unit') {
+          const def = UNIT_DEFS[e.defId];
+          if (def.resident) people += 1;            // 居民实体（在岗/在途）
+          else if ((def.crew ?? 0) > 0) people += 1; // 兵籍/乘员（脱产，阵亡即减员）
+        } else if (e.done) {
+          cap += BUILDING_DEFS[e.defId].popBonus ?? 0;
         }
       }
       const p = this.players[owner];
-      p.pop = pop;
-      p.popCap = Math.min(POP_MAX, POP_BASE + cap + (p.edict === 'logistics' ? LOGISTICS_POP : 0));
+      p.pop = p.residents + people;
+      p.popCap = Math.min(POP_MAX, cap + (p.edict === 'logistics' ? LOGISTICS_POP : 0));
     }
+  }
+
+  // ================= 居民与岗位（v0.18） =================
+
+  /** 岗位分配：从待业池调1人，从最近住房走出来去上岗（迁居制） */
+  assignJob(buildingId: number): boolean {
+    const b = this.entities.get(buildingId);
+    if (!b || b.kind !== 'building' || !b.done || b.owner > 1) return false;
+    const def = BUILDING_DEFS[b.defId];
+    if (!def.jobs) return false;
+    const staff = b.staffIds ?? (b.staffIds = []);
+    if (staff.length >= def.jobs.slots) return false;
+    const p = this.players[b.owner];
+    if (p.residents < 1) return false;
+    // 就近住房（民居优先，否则主堡）
+    const home = this.nearestHousing(b.owner, b.x, b.y) ?? b;
+    p.residents -= 1;
+    const off = home.radius() + 16;
+    const u = this.spawnUnit('resident', b.owner, home.x + ((staff.length * 17) % 21) - 10, home.y + off + ((staff.length * 11) % 9));
+    u.jobKind = def.jobs.kind;
+    u.jobBuilding = b.id;
+    staff.push(u.id);
+    this.recomputePop();
+    return true;
+  }
+
+  /** 撤岗：指定（或最后一名）在岗居民回待业池（v1 无走回动画） */
+  unassignJob(buildingId: number, workerId?: number): boolean {
+    const b = this.entities.get(buildingId);
+    if (!b || b.kind !== 'building' || b.owner > 1) return false;
+    const staff = b.staffIds;
+    if (!staff || staff.length === 0) return false;
+    const idx = workerId != null ? staff.indexOf(workerId) : staff.length - 1;
+    if (idx < 0) return false;
+    const id = staff.splice(idx, 1)[0];
+    const u = this.entities.get(id);
+    if (u) this.entities.delete(id); // 在途的也直接回池
+    this.players[b.owner].residents += 1;
+    this.recomputePop();
+    return true;
+  }
+
+  /** 切换税率档（低→中→高→低） */
+  setTaxTier(owner: 0 | 1): void {
+    const p = this.players[owner];
+    p.taxTier = ((p.taxTier + 1) % 3) as 0 | 1 | 2;
+    this.addLog('system', `税率调整为${p.taxTier === 0 ? '低税（民心舒适）' : p.taxTier === 1 ? '中税' : '高税（来钱快，民心受损）'}`, owner);
+  }
+
+  /** 就近住房（民居 > 主堡），供迁居出生点 */
+  nearestHousing(owner: number, x: number, y: number): Entity | null {
+    let best: Entity | null = null, bestD = Infinity;
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'building' || !e.done || e.owner !== owner) continue;
+      const isHouse = e.defId === 'house' || BUILDING_DEFS[e.defId].isMain;
+      if (!isHouse) continue;
+      const d = dist(x, y, e.x, e.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
   }
 
   // ================= 查询 =================
@@ -754,11 +852,28 @@ export class World {
     }
   }
 
-  /** 建造（未完成）或修理（已完成且受损）；工程车专用 */
+  /** 建造（未完成→先取料表演）或修理（已完成且受损，免取料）；建造车专用 */
   issueBuild(ids: number[], buildingId: number): void {
+    const site = this.entities.get(buildingId);
     for (const id of ids) {
       const e = this.entities.get(id);
       if (!e || e.kind !== 'unit') continue;
+      e.gatherState = null;
+      e.jobT = 0;
+      // v0.18 取料表演：新工地先去最近仓库装料（账目已扣，物流看得见）
+      if (site && site.kind === 'building' && !site.done) {
+        const depot = this.nearestDepot(e.owner, e.x, e.y);
+        if (depot) {
+          e.resTile = buildingId; // 记住工地：取完料回来施工
+          e.gatherState = 'toDepot';
+          // 仓库中心在建筑脚印内（不可走），A*会扑空——吸附到最近可走格
+          const tw = nearestWalkable(this.walkable, Math.floor(depot.x / TILE), Math.floor(depot.y / TILE));
+          e.order = { kind: 'move', target: { x: (tw.x + 0.5) * TILE, y: (tw.y + 0.5) * TILE } };
+          e.engagedId = null; e.firingHold = false;
+          e.path = null; e.pathPending = false;
+          continue;
+        }
+      }
       e.order = { kind: 'build', targetId: buildingId };
       e.engagedId = null; e.firingHold = false;
       e.gatherState = null;
@@ -766,26 +881,6 @@ export class World {
     }
   }
 
-  /** 人工采集：右键树（wood）或矿（ore）。工程车自动 采集→满载回仓→卸货→循环 */
-  issueGather(ids: number[], resTile: number, res: 'wood' | 'ore'): void {
-    let ordered = 0;
-    for (const id of ids) {
-      const e = this.entities.get(id);
-      if (!e || e.kind !== 'unit' || !UNIT_DEFS[e.defId].gather) continue;
-      e.order = { kind: 'gather', resTile, res };
-      e.gatherState = 'toRes';
-      e.resTile = resTile;
-      e.resExhausted = false;
-      e.engagedId = null; e.firingHold = false;
-      e.path = null; e.pathPending = false;
-      ordered++;
-    }
-    if (ordered > 0) {
-      // 落点标签：让玩家知道指令生效了
-      const tx = resTile % MAP_W, ty = (resTile / MAP_W) | 0;
-      this.addFx((tx + 0.5) * TILE, (ty + 0.5) * TILE, 'mark', 0, 1.4, undefined, res === 'wood' ? '伐木' : '采矿');
-    }
-  }
 
   // ================= 特效 =================
 

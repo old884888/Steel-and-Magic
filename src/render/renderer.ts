@@ -1,4 +1,4 @@
-import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, T_FARM, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER, REGEN_DELAY } from '../config';
+import { MAP_W, MAP_H, TILE, T_TREE, T_RAMP, T_GRASS, T_WATER, T_ORE, T_FORD, T_FARM, COLORS, MAX_HEIGHT, HEIGHT_OFFSET, AIR_HOVER, REGEN_DELAY, CARCASS_DECAY_STEP, CARCASS_DECAY_PCT } from '../config';
 import { UNIT_DEFS } from '../data/units';
 import { BUILDING_DEFS } from '../data/buildings';
 import type { World } from '../sim/world';
@@ -196,6 +196,28 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
+    // ---- 野物尸体（剩余bounty份额：肉堆随衰减缩水，提示"快收"） ----
+    for (const c of this.world.carcasses) {
+      const age = this.world.time - c.born;
+      const ratio = Math.max(0, 1 - Math.floor(age / CARCASS_DECAY_STEP) * CARCASS_DECAY_PCT / 100);
+      if (ratio <= 0) continue;
+      if (c.credit !== 0 && !isVisible(this.world, 0, c.x, c.y)) continue;
+      const hOff = this.world.heightAt(c.x, c.y) * HEIGHT_OFFSET;
+      const cy = c.y - hOff;
+      const r = 3 + 5 * ratio;
+      ctx.fillStyle = '#7a2e22';
+      ctx.beginPath(); ctx.ellipse(c.x, cy, r, r * 0.6, 0.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#a44a35';
+      ctx.beginPath(); ctx.ellipse(c.x - r * 0.2, cy - 1, r * 0.55, r * 0.35, 0.4, 0, Math.PI * 2); ctx.fill();
+      // 露出的骨头
+      ctx.strokeStyle = '#e8dcc0';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(c.x + r * 0.5, cy + r * 0.3);
+      ctx.lineTo(c.x + r * 1.1, cy - r * 0.4);
+      ctx.stroke();
+    }
+
     // ---- 实体（建筑+单位 按屏幕深度排序，伪3D遮挡正确） ----
     interface D { e: Entity; kind: 'b' | 'u'; depth: number }
     const list: D[] = [];
@@ -216,6 +238,22 @@ export class Renderer {
       } else {
         this.drawUnit(e, sel, cam.zoom);
       }
+    }
+
+    // ---- 岗位空缺标记（v0.18）：缺人的岗位建筑头顶黄色感叹号 ----
+    for (const d of list) {
+      const e = d.e;
+      if (d.kind !== 'b' || !e.done || e.owner !== 0) continue;
+      const jobs = BUILDING_DEFS[e.defId].jobs;
+      if (!jobs || (e.staffIds?.length ?? 0) >= jobs.slots) continue;
+      const hOff = this.world.heightAt(e.x, e.y) * HEIGHT_OFFSET;
+      const ty = e.y - e.radius() - 16 - hOff;
+      ctx.fillStyle = 'rgba(20,26,34,.85)';
+      ctx.beginPath(); ctx.arc(e.x, ty, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffd75e';
+      ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', e.x, ty + 4);
     }
 
     // ---- 护盾穹顶 ----

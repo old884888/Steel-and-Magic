@@ -24,7 +24,7 @@ export const KINGDOM_ALIAS: Record<string, string> = {
 const normId = (defId: string): string => KINGDOM_ALIAS[defId] ?? defId;
 
 /** 单位存量上限（性格权重决定"想不想要"，这里是"最多要多少"） */
-const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, farmer: 0, mcv: 0 }; // 农夫/额外基地车：玩家侧专属，AI暂不采用
+const UNIT_CAPS: Record<string, number> = { builder: 2, infantry: 10, tank: 6, artillery: 2, mcv: 0 }; // 额外基地车：玩家侧专属，AI暂不采用
 
 /**
  * AI指挥官：每 cfg.thinkSec 秒醒来一次。
@@ -114,6 +114,33 @@ export class AIController {
       }
     }
 
+    // ---- 岗位补员（v0.18 最小兼容层，非§五仲裁）----
+    // 优先序（§5.1）：农活随时补（食物=兵籍命脉）；其余岗位与征兵共享"待业>3"储备线
+    if (me.residents > 0) {
+      const wantJobs: string[] = [];
+      for (const b of snap.myBuildings) {
+        if (!b.done) continue;
+        const jobs = BUILDING_DEFS[b.defId].jobs;
+        if (!jobs) continue;
+        const staff = b.staffIds?.length ?? 0;
+        for (let i = staff; i < jobs.slots; i++) wantJobs.push(b.id + '');
+      }
+      wantJobs.sort((a, b) => {
+        const ja = BUILDING_DEFS[w.entities.get(Number(a))!.defId].jobs!.kind;
+        const jb = BUILDING_DEFS[w.entities.get(Number(b))!.defId].jobs!.kind;
+        const pri = (k: string) => (k === 'farmer' ? 0 : k === 'lumberjack' ? 1 : k === 'miner' ? 2 : 3);
+        return pri(ja) - pri(jb);
+      });
+      while (wantJobs.length > 0) {
+        const id = Number(wantJobs.shift());
+        const host = w.entities.get(id);
+        const kind = host ? BUILDING_DEFS[host.defId].jobs?.kind : undefined;
+        const gate = (kind === 'farmer' || kind === 'lumberjack') ? 0 : 3; // 农活/伐木=内政地基随时补；矿工搬运工走储备线
+        if (me.residents <= gate) break;
+        if (!w.assignJob(id)) break;
+      }
+    }
+
     // ---- 战术模块（并行正交：撤退/保炮车/克制配兵修正） ----
     if (tacticOn('retreat')) applyRetreat(ctx);
     if (tacticOn('spareArtillery')) applySpareArtillery(ctx);
@@ -138,6 +165,8 @@ export class AIController {
         id => this.unitNeed(snap, id),
       );
       for (const c of ranked) {
+        // 储备滞回（§5.1规则2）：待业≤3禁征新兵——经济抽干了谁都赢不了
+        if ((UNIT_DEFS[c.defId].crew ?? 0) > 0 && me.residents < 4) continue;
         if (tryEnqueue(w, b, c.defId)) break; // 最高分的排不起就试下一个
       }
     }
@@ -314,15 +343,30 @@ export class AIController {
         const pressure = Math.max(snap.wood, snap.food, snap.ore) / snap.storageCap;
         return pressure > 0.75 ? 1.5 + pressure : 0.05;
       }
+      case 'house': {
+        // 民居：人口水位跟着盖（在建工地也占容量，防开局全砸民房工地）
+        const pending = snap.myBuildings.filter(b => b.defId === 'house' && !b.done).length;
+        const capWithSites = snap.popCap + pending * 5;
+        const ratio = snap.pop / Math.max(1, capWithSites);
+        return snap.pop >= capWithSites ? 2.6 : ratio > 0.6 ? 1.4 : 0.35;
+      }
+      case 'waterStation':
+      case 'clinic': {
+        // 卫生：有民居没卫生 → 民心四成权重在漏
+        const hasHouse = snap.myBuildings.some(b => b.defId === 'house' && b.done);
+        if (!hasHouse) return 0.05;
+        return count === 0 ? 1.2 : 0.4;
+      }
       case 'farm': {
-        // 食物是万金油材料：断粮/人口紧张时高优先
-        const foodStarving = snap.incomeFood < 0.35 && snap.food < 80;
-        return (snap.popCap - snap.pop < 5 || foodStarving) ? 2.4 : snap.pop / Math.max(1, snap.popCap) + 0.2;
+        // 食物是兵籍命脉：第一座农庄=食物收入的门票（库存高也要盖）；断粮紧急
+        if (snap.food < 80) return 2.4;
+        if (count === 0) return 2.0;
+        return count < 3 ? 1.4 : snap.pop / Math.max(1, snap.popCap) > 0.5 ? 1.0 : 0.5;
       }
       case 'lumber':
-        return snap.incomeWood < 0.4 ? 1.6 : 0.8;
+        return snap.wood < 120 ? 1.8 : 1.0;
       case 'mine':
-        return 0.9;
+        return snap.ore < 80 ? 1.6 : 0.9;
       case 'barracks':
         return count === 0 ? 1.5 : 0.7;
       case 'factory':
@@ -338,7 +382,9 @@ export class AIController {
         // 奇观：钢铁纪元解锁后盖（era门槛就是硬闸）
         return snap.era >= 2 && count === 0 ? 2.5 : 0;
       case 'turret':
-        return 0.5;
+        return snap.threatened ? 1.2 : 0.3; // 没人打你别修炮塔（穷）
+      case 'wall':
+        return snap.threatened ? 0.8 : 0.1; // 太平年间砌墙=浪费木头
       default:
         return 0.5;
     }

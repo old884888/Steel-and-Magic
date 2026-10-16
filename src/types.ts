@@ -34,6 +34,7 @@ export interface WeaponDef {
   cooldown: number;    // 秒
   cat: 'light' | 'heavy';             // 攻击类别（减伤表列）
   pierce?: boolean;                   // 破甲标签：仅重攻击可贴；血扣全额+甲扣伤害×2；与溅射互斥
+  melee?: boolean;                    // 真近战：射程内直接结算，不生成弹道实体（狼咬/未来骑兵）
   visual: 'bullet' | 'shell' | 'cannon' | 'missile' | 'flame';  // 弹道外观（纯视觉）
   speed?: number;                     // 弹速覆盖（默认按visual查VISUAL_SPEED）
   impactFire?: boolean;               // 落地生成燃烧区
@@ -45,6 +46,14 @@ export interface WeaponDef {
 }
 
 export type MoveClass = 'land' | 'air' | 'naval';
+
+/** 岗位定义（居民与家园 v0.18）：岗位建筑的可分配工位 */
+export type JobKind = 'farmer' | 'lumberjack' | 'miner' | 'hauler';
+export interface JobDef {
+  kind: JobKind;
+  slots: number;       // 工位数
+  bufferCap: number;   // 小缓冲容量（产出先落缓冲，搬运工/劳役班转运）
+}
 
 export interface UnitDef {
   id: string;
@@ -60,7 +69,7 @@ export interface UnitDef {
   buildTime: number;           // 秒
   producedBy: string;          // 建筑id
   weapon?: WeaponDef;
-  canBuild?: string[];         // 可建造的建筑id列表（工程车）
+  canBuild?: string[];         // 可建造的建筑id列表（建造车）
   moveClass?: MoveClass;             // 移动层级（默认land；air无视地形/naval走水面）
   bomber?: boolean;                  // 轰炸机：飞越目标头顶投弹（不停火不悬停）
   armor?: 'light' | 'heavy';         // 装甲类别（减伤表行键；轻/重二元锁死）
@@ -70,12 +79,10 @@ export interface UnitDef {
   wild?: 'passive' | 'territorial';  // 野生动物习性（passive不索敌，territorial守家）
   bounty?: ResAmount;                // 击杀缴获（猎食/剿灭奖励）
   mg?: WeaponDef;                    // 舷侧机枪：固定双联，独立索敌/冷却，与主炮互不干扰
-  pop?: number;                      // 人口占用（默认1；农夫0.5）
+  crew?: number;                     // 乘员征召：训练时消耗的居民数（兵籍单行道，阵亡=人口永久-1；0=不吃居民）
   stopToFire?: boolean;              // 停车架炮：射程内停下开火，不走A（自行火炮专属）
-  gather?: {                   // 采集能力（伐木/采矿）
-    rate: number;              // 每秒采集量
-    capacity: number;          // 载货上限
-  };
+  resident?: boolean;                // 居民单位（在岗工人实体，无武装可被袭击）
+  job?: JobKind;                     // 居民的岗位类型（与所在建筑jobs.kind匹配）
 }
 
 export interface BuildingDef {
@@ -108,8 +115,11 @@ export interface BuildingDef {
   wonder?: boolean;            // 奇观（落成启动加冕倒计时；被拆则中断）
   shieldPool?: number;         // 护盾发生器：护盾池上限
   shieldRegen?: number;        // 护盾回充速率（脱战5秒后）
-  needWater?: boolean;         // 船厂：必须临水
+  needWater?: boolean;         // 船厂/净水站：必须临水
   limitPerPlayer?: number;     // 每家建造上限（商贸站2/纪念碑1）
+  jobs?: JobDef;               // 岗位（居民与家园v0.18）：可分配居民工位+小缓冲
+  needNear?: { defId: string; dist: number };  // 澡堂等：须邻近指定建筑（格）
+  hygieneR?: number;           // 卫生覆盖半径（格；0=无覆盖能力）
 }
 
 export type EntityKind = 'unit' | 'building';
@@ -131,6 +141,15 @@ export interface Wreck {
   dur: number;                // 留存总时长（秒）
   size: number;               // 建筑格数（rubble用）
   seed: number;               // 外观种子
+}
+
+/** 野物尸体：挂着剩余bounty份额，随时间衰减，同阵营单位走近自动拾取（v0.17） */
+export interface Carcass {
+  x: number; y: number;
+  res: Res;
+  amount0: number;            // 初始份额（击杀bounty的另一半）
+  born: number;               // 生成时间（游戏秒）
+  credit: number;             // 归属阵营（拾取资格）
 }
 
 export interface Projectile {

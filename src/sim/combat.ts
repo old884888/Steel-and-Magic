@@ -44,8 +44,9 @@ function applyOrderFiring(e: Entity, c: { effRange: number; d: number; inMax: bo
     // 轰炸机：飞越目标头顶即投弹（冷却好了就投），永不停不悬停
     if (c.inMax && c.inMin) firing = true;
   } else if (e.order.kind === 'attack') {
-    // RW式攻击：推进到60%射程（火炮=全射程）站桩，到位前边推进边开火
-    const stopAt = UNIT_DEFS[e.defId].stopToFire ? c.effRange : c.effRange * 0.6;
+    // RW式攻击：推进到60%射程（火炮/近战=全射程）站桩，到位前边推进边开火
+    const melee = weaponOf(e)?.melee === true;
+    const stopAt = (UNIT_DEFS[e.defId].stopToFire || melee) ? c.effRange : c.effRange * 0.6;
     if (c.d <= stopAt) { e.firingHold = true; e.path = null; }
     if (c.inMax && c.inMin) firing = true;
     else if (c.inMax && !c.inMin) e.firingHold = true; // 贴脸盲区：愣住
@@ -200,10 +201,16 @@ export function updateCombat(w: World, dt: number): void {
       e.turretAngle += da * Math.min(1, dt * 6);
     }
 
-    // ---- 开火（落点弹：锁定当前位置+散布，飞过去结算） ----
+    // ---- 开火（落点弹：锁定当前位置+散布，飞过去结算；真近战无弹道直接结算） ----
     if (firing && weapon && e.cooldown <= 0 && e.done && e.engagedId != null) {
       const t = w.entities.get(e.engagedId);
       if (t) {
+        if (weapon.melee) {
+          // 真近战：贴身直接结算伤害+扑咬特效，不生成projectile实体
+          damage(w, t, effDamage, e.owner, weapon.cat, !!weapon.pierce);
+          w.addFx(t.x + (Math.random() - 0.5) * 10, t.y + (Math.random() - 0.5) * 10, 'muzzle', 8, 0.1, e.turretAngle);
+          e.cooldown = weapon.cooldown;
+        } else {
         const mx = e.x + Math.cos(e.turretAngle) * (e.radius() + 3);
         const my = e.y + Math.sin(e.turretAngle) * (e.radius() + 3);
         const spread = weapon.spread ?? 4;
@@ -229,6 +236,7 @@ export function updateCombat(w: World, dt: number): void {
         });
         w.addFx(mx, my, 'muzzle', weapon.visual === 'cannon' ? 15 : 9, 0.08, e.turretAngle);
         e.cooldown = weapon.cooldown;
+        }
       }
     }
   }
@@ -394,14 +402,26 @@ export function damage(w: World, target: Entity, amount: number, fromOwner?: num
   }
 
   // 击杀赏金：野生动物/蛮族/营地被消灭时，击杀方获得资源
+  // 野物（鹿/狼）走"快打快收"：半额立付，另一半挂尸体衰减（v0.17腐烂）
   if (target.hp <= 0) {
     if (fromOwner != null && fromOwner <= 1) {
       const bounty = target.kind === 'unit' ? UNIT_DEFS[target.defId]?.bounty : BUILDING_DEFS[target.defId]?.bounty;
       if (bounty) {
+        const wild = target.kind === 'unit' && (target.defId === 'deer' || target.defId === 'wolf');
+        const parts: string[] = [];
         for (const [res, v] of Object.entries(bounty) as [Res, number][]) {
-          if (v) w.addRes(fromOwner, res, v);
+          if (!v) continue;
+          const now = wild ? Math.round(v / 2) : v;
+          const left = v - now;
+          if (now > 0) w.addRes(fromOwner, res, now);
+          if (left > 0) {
+            w.carcasses.push({ x: target.x, y: target.y, res, amount0: left, born: w.time, credit: fromOwner });
+            parts.push((res === 'wood' ? '木' : res === 'food' ? '食' : '矿') + now + `+尸${left}`);
+          } else {
+            parts.push((res === 'wood' ? '木' : res === 'food' ? '食' : '矿') + now);
+          }
         }
-        w.addLog('econ', `缴获战利品：${Object.entries(bounty).map(([k, v]) => (k === 'wood' ? '木' : k === 'food' ? '食' : '矿') + v).join(' ')}`, fromOwner, 'bounty:' + target.id, 10);
+        w.addLog('econ', `缴获战利品：${parts.join(' ')}${wild ? '（尸体份额40秒内腐蚀，速收！）' : ''}`, fromOwner, 'bounty:' + target.id, 10);
       }
     }
     w.removeEntity(target.id);
